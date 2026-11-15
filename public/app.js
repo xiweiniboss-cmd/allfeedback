@@ -125,7 +125,8 @@
     } catch (e) { return 0; }
   }
   function triggerDownload(a) {
-    var x = el('a'); x.href = fileUrl(a, true); x.setAttribute('download', a.name || a.key.split('/').pop()); x.rel = 'noopener';
+    var x = el('a'); x.href = fileUrl(a, true); // 文件名以服务端 Content-Disposition 为准（扩展名按真实类型）
+    x.setAttribute('download', ''); x.rel = 'noopener';
     x.hidden = true; document.body.appendChild(x); x.click(); setTimeout(function () { x.remove(); }, 1000);
   }
   function probeMsg(st) { return st === 404 ? '文件不存在' : st === 401 ? '登录已过期' : st === 0 ? '网络错误，下载失败' : '下载失败（HTTP ' + st + '）'; }
@@ -483,7 +484,7 @@
       box = el('div', 'att video-box'); wrap.classList.add('is-video');
       media = el('video'); media.src = src; media.controls = true; media.preload = 'metadata'; media.setAttribute('playsinline', ''); box.appendChild(media);
     } else {
-      box = el('a', 'att file'); box.href = fileUrl(a, true); box.setAttribute('download', name); box.rel = 'noopener noreferrer'; box.title = name;
+      box = el('a', 'att file'); box.href = fileUrl(a, true); box.setAttribute('download', ''); box.rel = 'noopener noreferrer'; box.title = name;
       box.appendChild(icon('file')); box.appendChild(el('span', null, name));
     }
     wrap.appendChild(box);

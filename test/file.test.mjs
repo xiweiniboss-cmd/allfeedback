@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { withSecurityHeaders, PAGE_CSP, contentDisposition, downloadName } from '../lib/app.js';
+import { withSecurityHeaders, PAGE_CSP, contentDisposition, downloadName, extForType } from '../lib/app.js';
 import { makeEnv, call, login } from './helpers.mjs';
 
 const SANDBOX = "default-src 'none'; sandbox";
@@ -112,17 +112,17 @@ test('download=1：恶意文件名不能注入头部 / 穿越路径 / 伪装扩�
     assert.match(cd, SAFE_CD, JSON.stringify(name));
     assert.ok(!/[\r\n]/.test(cd));
     assert.equal(r.headers.get('set-cookie'), null);
-    const fname = downloadName(name, 'fb/xhs/1.png');
+    const fname = downloadName(name, 'fb/xhs/1.png', 'image/png');
     assert.ok(!/[\/\\"\r\n\u0000\u202e]/.test(fname), fname);
     assert.ok(fname.endsWith('.png'), fname);
     assert.ok(Array.from(fname).length <= 125, fname);
     assert.ok(!fname.startsWith('.'), fname);
   }
-  assert.equal(downloadName('\u202egnp.exe', 'fb/z.png'), 'gnp.exe.png');
-  assert.equal(downloadName('图.JPEG', 'fb/k.jpg'), '图.JPEG');
-  assert.equal(downloadName('../../etc/passwd', 'fb/x.bin'), 'passwd.bin');
-  assert.equal(downloadName('', 'fb/1791_ab_tiktok_76.mp4'), '1791_ab_tiktok_76.mp4');
-  assert.match(contentDisposition('视频', 'fb/q.mp4'), /^attachment; filename="attachment\.mp4"; filename\*=UTF-8''%E8%A7%86%E9%A2%91\.mp4$/);
+  assert.equal(downloadName('\u202egnp.exe', 'fb/z.png', 'image/png'), 'gnp.exe.png');
+  assert.equal(downloadName('图.JPEG', 'fb/k.jpg', 'image/jpeg'), '图.JPEG');
+  assert.equal(downloadName('../../etc/passwd', 'fb/x.bin', 'application/octet-stream'), 'passwd.bin');
+  assert.equal(downloadName('', 'fb/1791_ab_tiktok_76.mp4', 'video/mp4'), '1791_ab_tiktok_76.mp4');
+  assert.match(contentDisposition('视频', 'fb/q.mp4', 'video/mp4'), /^attachment; filename="attachment\.mp4"; filename\*=UTF-8''%E8%A7%86%E9%A2%91\.mp4$/);
 });
 
 test('download=1：仍需登录、仍校验键、文件不存在返回 404', async () => {
@@ -134,4 +134,43 @@ test('download=1：仍需登录、仍校验键、文件不存在返回 404', asy
   const m = await call(env, dl('fb/1791364929190_b4mjlb_tiktok_7682383659151707399.mp4', 'v.mp4'), { cookie });
   assert.equal(m.status, 404);
   assert.equal(m.headers.get('content-disposition'), null);
+});
+
+test('下载扩展名以真实 Content-Type 为准：伪装的 .html / .exe 图片 → .png，未知类型 → .bin', async () => {
+  const map = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/pjpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/heic': 'heic',
+    'image/heif': 'heif', 'image/avif': 'avif', 'image/bmp': 'bmp', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
+    'VIDEO/MP4': 'mp4', 'video/x-matroska': 'mkv', 'video/ogg': 'ogv', 'video/h264': 'h264',
+    'video/html': 'bin', 'video/x-exe': 'bin', 'video/svg+xml': 'bin', 'video/a.b': 'bin',
+    'image/svg+xml': 'bin', 'text/html': 'bin', 'application/x-msdownload': 'bin', 'video/mp4; codecs=avc1': 'bin', '': 'bin', undefined: 'bin',
+  };
+  for (const [t, e] of Object.entries(map)) assert.equal(extForType(t === 'undefined' ? undefined : t), e, t);
+  // 名字 / 存储键里的扩展名都不算数
+  assert.equal(downloadName('x.html', 'fb/a.html', 'image/png'), 'x.html.png');
+  assert.equal(downloadName('setup.exe', 'fb/a.exe', 'image/png'), 'setup.exe.png');
+  assert.equal(downloadName('照片.png', 'fb/a.png', 'image/jpeg'), '照片.png.jpg');
+  assert.equal(downloadName('照片.jpeg', 'fb/a', 'image/jpeg'), '照片.jpeg');
+  assert.equal(downloadName('录屏.MOV', 'fb/a.mp4', 'video/quicktime'), '录屏.MOV');
+  assert.equal(downloadName('page.png', 'fb/x.png', 'text/html'), 'page.png.bin');
+  assert.equal(downloadName('', 'fb/x.html', 'text/html'), 'x.html.bin');
+  assert.equal(downloadName('截图 1', 'fb/a.png', 'image/png'), '截图 1.png');
+  for (const n of ['a.html', 'a.exe', 'a.svg', 'a.js', 'a.bat', 'a.HTM']) {
+    for (const t of ['image/png', 'video/html', 'text/html', 'application/octet-stream', 'image/svg+xml']) {
+      const out = downloadName(n, 'fb/' + n, t);
+      assert.ok(/\.(png|bin)$/.test(out), out);
+    }
+  }
+  // 经过 handleFile：类型来自 R2 元数据，而不是 name / key
+  const { env } = makeEnv();
+  env.FEEDBACK_BUCKET.m.set('fb/disguised.html', { data: new Uint8Array([1]), type: 'image/png' });
+  env.FEEDBACK_BUCKET.m.set('fb/weird.png', { data: new Uint8Array([1]), type: 'application/x-msdownload' });
+  const cookie = await login(env);
+  const a = await call(env, '/api/file?key=fb/disguised.html&download=1&name=' + encodeURIComponent('报告.html'), { cookie });
+  assert.equal(a.headers.get('content-type'), 'image/png');
+  assert.ok(a.headers.get('content-disposition').endsWith("filename*=UTF-8''" + encodeURIComponent('报告.html.png')));
+  const b = await call(env, '/api/file?key=fb/weird.png&download=1&name=photo.png', { cookie });
+  assert.equal(b.headers.get('content-type'), 'application/octet-stream');
+  assert.equal(b.headers.get('content-disposition'), 'attachment; filename="photo.png.bin"; filename*=UTF-8\'\'photo.png.bin');
+  const c = await call(env, '/api/file?key=fb/xhs/1.png&download=1&name=' + encodeURIComponent('截图.png'), { cookie });
+  assert.ok(c.headers.get('content-disposition').endsWith("filename*=UTF-8''" + encodeURIComponent('截图.png')));
 });
