@@ -785,7 +785,7 @@
   function plTitle() {
     var s = state.pl.site;
     $('pageTitle').textContent = s ? (SITES[s] || s) + ' 解析记录' : '解析记录';
-    $('pageSub').textContent = '谁解析了什么：链接、结果、IP、归属地、设备 ID（保留 30 天）';
+    $('pageSub').textContent = '谁解析了什么：链接、结果、IP、归属地、设备 ID 与指纹（只记有效链接，保留 30 天）';
   }
   function renderPlNav() {
     var nav = $('siteNav'); nav.textContent = '';
@@ -803,6 +803,7 @@
     if (k === 'site') { state.pl.site = v; $('plSite').value = v; renderPlNav(); plTitle(); }
     if (k === 'ip') $('plIp').value = v;
     if (k === 'device') $('plDev').value = v;
+    if (k === 'fp') $('plFp').value = v;
     loadPl(true);
   }
   function plQuery() {
@@ -811,6 +812,7 @@
     if (state.pl.result) p.set('result', state.pl.result);
     if ($('plIp').value.trim()) p.set('ip', $('plIp').value.trim());
     if ($('plDev').value.trim()) p.set('device', $('plDev').value.trim());
+    if ($('plFp').value.trim()) p.set('fp', $('plFp').value.trim());
     if ($('plFrom').value) p.set('from', $('plFrom').value);
     if ($('plTo').value) p.set('to', $('plTo').value);
     p.set('limit', '50');
@@ -834,18 +836,19 @@
     state.pl.cursor = j.cursor;
     $('plMore').hidden = !j.more;
     if (!$('plList').querySelector('.pl-row')) {
-      var filtered = state.pl.site || state.pl.result || $('plIp').value.trim() || $('plDev').value.trim() || $('plFrom').value || $('plTo').value;
+      var filtered = state.pl.site || state.pl.result || $('plIp').value.trim() || $('plDev').value.trim() || $('plFp').value.trim() || $('plFrom').value || $('plTo').value;
       $('plList').appendChild(stateBox('empty', filtered ? '没有匹配的解析记录' : '还没有解析记录', filtered ? '换个筛选条件试试' : '用户在各解析站解析后会出现在这里', filtered ? '清除筛选' : '', clearPl));
     }
   }
   function clearPl() {
-    ['plIp', 'plDev', 'plFrom', 'plTo'].forEach(function (id) { $(id).value = ''; });
+    ['plIp', 'plDev', 'plFp', 'plFrom', 'plTo'].forEach(function (id) { $(id).value = ''; });
     state.pl.result = ''; $('segPlResult').querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-checked', x.getAttribute('data-v') === '' ? 'true' : 'false'); });
     setPlFilter('site', '');
   }
   function shortDev(d) { return d ? d.slice(0, 8) + '…' + d.slice(-4) : ''; }
+  var BL_NAMES = { ip: ' IP', device: '设备', fp: '设备指纹' };
   async function doBlock(type, value, note, label) {
-    if (!(await confirmBox('拉黑这个' + (type === 'ip' ? ' IP' : '设备') + '？', label + ' 将无法在任何解析站解析（返回「访问受限」），最多 1 分钟后生效，可以在「黑名单」里解除。', '拉黑'))) return false;
+    if (!(await confirmBox('拉黑这个' + (BL_NAMES[type] || '') + '？', label + ' 将无法在任何解析站解析（返回「访问受限」），最多 1 分钟后生效，可以在「黑名单」里解除。', '拉黑'))) return false;
     var j = await api('/api/block', { method: 'POST', body: { type: type, value: value, note: note } });
     if (!j.ok) { if (j.status !== 401) toast('拉黑失败：' + (j.error || '')); return false; }
     toast('已拉黑 ' + j.value);
@@ -862,7 +865,7 @@
     var head = el('div', 'pf-head');
     head.appendChild(el('span', 'chip site', x.siteLabel || SITES[x.site] || x.site));
     head.appendChild(el('span', 'chip ' + (x.ok ? 'res-ok' : 'res-fail'), x.ok ? '成功' : '失败' + (x.status ? ' · ' + x.status : '')));
-    if (x.ipBlocked || x.deviceBlocked) head.appendChild(el('span', 'chip res-block', '已拉黑'));
+    if (x.ipBlocked || x.deviceBlocked || x.fpBlocked) head.appendChild(el('span', 'chip res-block', '已拉黑'));
     var tm = el('span', 'fb-time');
     if (x.ts) { tm.appendChild(el('b', null, fmtRel(x.ts))); tm.appendChild(document.createTextNode(' · ' + fmtAbs(x.ts))); tm.title = '北京时间 ' + fmtAbs(x.ts); }
     head.appendChild(tm);
@@ -891,6 +894,12 @@
       db.addEventListener('click', function () { setPlFilter('device', x.device); });
       meta.appendChild(db);
     } else meta.appendChild(metaItem('hash', '无设备 ID', '旧版页面或非浏览器请求，没有带设备 ID'));
+    if (x.fp) {
+      var fb = el('button', 'meta-link'); fb.type = 'button'; fb.title = '设备指纹：' + x.fp + '（点击只看这个指纹）';
+      fb.appendChild(icon('hash')); fb.appendChild(el('span', null, '指纹 ' + x.fp.slice(0, 8)));
+      fb.addEventListener('click', function () { setPlFilter('fp', x.fp); });
+      meta.appendChild(fb);
+    }
     if (x.ua) meta.appendChild(metaItem('globe', x.ua.slice(0, 60) + (x.ua.length > 60 ? '…' : ''), x.ua));
     foot.appendChild(meta);
     var acts = el('div', 'fb-actions');
@@ -908,6 +917,7 @@
     }
     if (x.ipBlockValue) acts.appendChild(blockBtn('ip', x.ipBlockValue, x.ipBlocked, ' IP', x.ipBlockValue));
     if (x.device) acts.appendChild(blockBtn('device', x.device, x.deviceBlocked, '设备', '设备 ' + x.device));
+    if (x.fp) acts.appendChild(blockBtn('fp', x.fp, x.fpBlocked, '指纹', '设备指纹 ' + x.fp));
     foot.appendChild(acts);
     r.appendChild(foot);
     return r;
@@ -918,11 +928,11 @@
     box.textContent = '';
     if (!j.ok) { if (j.status !== 401) box.appendChild(stateBox('error', '加载失败', j.error || '请稍后重试', '重试', loadBl)); return; }
     $('blCount').textContent = j.items.length ? '共 ' + j.items.length + ' 个' : '';
-    if (!j.items.length) { box.appendChild(stateBox('empty', '黑名单是空的', '在「解析记录」里点「拉黑 IP」或「拉黑设备」，或在上面手动添加')); return; }
+    if (!j.items.length) { box.appendChild(stateBox('empty', '黑名单是空的', '在「解析记录」里点「拉黑 IP」「拉黑设备」或「拉黑指纹」，或在上面手动添加')); return; }
     j.items.forEach(function (x) {
       var r = el('div', 'pl-row bl-item');
       var head = el('div', 'pf-head');
-      head.appendChild(el('span', 'chip kind', x.type === 'ip' ? 'IP' : '设备'));
+      head.appendChild(el('span', 'chip kind', x.type === 'ip' ? 'IP' : x.type === 'fp' ? '指纹' : '设备'));
       head.appendChild(el('span', 'bl-val', x.value));
       var tm = el('span', 'fb-time'); if (x.createdAt) { tm.appendChild(el('b', null, fmtRel(x.createdAt))); tm.appendChild(document.createTextNode(' · ' + fmtAbs(x.createdAt))); }
       head.appendChild(tm);
@@ -932,7 +942,7 @@
       var acts = el('div', 'fb-actions');
       var see = el('button', 'act-btn'); see.type = 'button'; see.textContent = '看记录';
       see.addEventListener('click', function () {
-        $('plIp').value = x.type === 'ip' && x.value.indexOf('/64') < 0 ? x.value : ''; $('plDev').value = x.type === 'device' ? x.value : '';
+        $('plIp').value = x.type === 'ip' && x.value.indexOf('/64') < 0 ? x.value : ''; $('plDev').value = x.type === 'device' ? x.value : ''; $('plFp').value = x.type === 'fp' ? x.value : '';
         setView('pl');
       });
       if (!(x.type === 'ip' && x.value.indexOf('/64') >= 0)) acts.appendChild(see);
@@ -951,7 +961,7 @@
     $('plSite').addEventListener('change', function () { setPlFilter('site', $('plSite').value); });
     seg('segPlResult', function (v) { state.pl.result = v; loadPl(true); });
     var t;
-    ['plIp', 'plDev'].forEach(function (id) {
+    ['plIp', 'plDev', 'plFp'].forEach(function (id) {
       $(id).addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { loadPl(true); }, 400); });
       $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') { clearTimeout(t); loadPl(true); } });
     });
@@ -961,7 +971,7 @@
     $('blForm').addEventListener('submit', async function (e) {
       e.preventDefault();
       var type = $('blType').value, v = $('blValue').value.trim();
-      if (!v) { toast('请填写要拉黑的 ' + (type === 'ip' ? 'IP' : '设备 ID')); return; }
+      if (!v) { toast('请填写要拉黑的 ' + ({ ip: 'IP', device: '设备 ID', fp: '设备指纹' }[type] || '')); return; }
       if (await doBlock(type, v, $('blNote').value.trim(), v)) { $('blValue').value = ''; $('blNote').value = ''; loadBl(); }
     });
   })();

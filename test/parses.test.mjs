@@ -5,13 +5,14 @@ import { fakeD1 } from './d1.mjs';
 import { createParseLog } from '../shared/parse-log.js';
 
 const DEV = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+const FP = '0123456789abcdef0123456789abcdef';
 function seedD1() {
   const d1 = fakeD1();
-  const ins = d1.db.prepare('INSERT INTO parse_log (ts, site, url, ok, status, reason, ip, country, region, city, device_id, ua) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)');
+  const ins = d1.db.prepare('INSERT INTO parse_log (ts, site, url, ok, status, reason, ip, country, region, city, device_id, ua, fp) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
   const t = Date.parse('2026-11-15T12:00:00+08:00');
-  ins.run(t - 86400000 * 2, 'bilibili', 'https://b23.tv/old', 1, 200, '', '1.1.1.1', 'CN', '北京', '北京', '', 'UA');
-  ins.run(t - 3600000, 'douyin', 'https://v.douyin.com/a/', 0, 502, '上游返回 HTTP 500', '203.0.113.5', 'CN', '广东', '深圳', DEV, 'UA');
-  ins.run(t, 'douyin', 'javascript:alert(1)', 1, 200, '', '2001:db8:1:2:3:4:5:6', 'US', '', '', 'bad', '<script>');
+  ins.run(t - 86400000 * 2, 'bilibili', 'https://b23.tv/old', 1, 200, '', '1.1.1.1', 'CN', '北京', '北京', '', 'UA', '');
+  ins.run(t - 3600000, 'douyin', 'https://v.douyin.com/a/', 0, 502, '上游返回 HTTP 500', '203.0.113.5', 'CN', '广东', '深圳', DEV, 'UA', FP);
+  ins.run(t, 'douyin', 'javascript:alert(1)', 1, 200, '', '2001:db8:1:2:3:4:5:6', 'US', '', '', 'bad', '<script>', 'zz<b>');
   return d1;
 }
 async function setup() {
@@ -35,6 +36,8 @@ test('/api/parses：最新在前，筛选站点 / IP / 设备 / 日期 / 结果�
   assert.deepEqual(j.items.map((x) => x.site), ['douyin', 'douyin', 'bilibili']);
   assert.equal(j.items[0].url, '', '非 http 链接不返回');
   assert.equal(j.items[0].device, '', '非法设备 ID 不返回');
+  assert.equal(j.items[0].fp, '', '非法指纹不返回');
+  assert.equal(j.items[1].fp, FP);
   assert.equal(j.items[0].ipBlockValue, '2001:db8:1:2::/64');
   assert.equal(j.items[1].region, '广东');
   const q = async (s) => (await (await call(env, '/api/parses?' + s, { cookie })).json()).items.length;
@@ -42,6 +45,8 @@ test('/api/parses：最新在前，筛选站点 / IP / 设备 / 日期 / 结果�
   assert.equal(await q('site=evil'), 3, '未知站点忽略');
   assert.equal(await q('ip=203.0.113.5'), 1);
   assert.equal(await q('device=' + DEV), 1);
+  assert.equal(await q('fp=' + FP), 1);
+  assert.equal(await q('fp=' + FP.toUpperCase()), 1);
   assert.equal(await q('from=2026-11-15&to=2026-11-15'), 2);
   assert.equal(await q('to=2026-11-14'), 1);
   assert.equal(await q('result=fail'), 1);
@@ -67,18 +72,27 @@ test('拉黑 / 解除：校验格式、IPv6 按 /64、同源 + JSON，列表能�
   assert.equal(r.value, '2001:db8:1:2::/64');
   r = await (await post('/api/block', { type: 'device', value: DEV.toUpperCase() })).json();
   assert.equal(r.value, DEV);
+  assert.equal((await post('/api/block', { type: 'fp', value: 'abc' })).status, 400);
+  r = await (await post('/api/block', { type: 'fp', value: FP.toUpperCase() })).json();
+  assert.deepEqual([r.ok, r.type, r.value], [true, 'fp', FP]);
   const bl = await (await call(env, '/api/blocklist', { cookie })).json();
-  assert.equal(bl.items.length, 3);
+  assert.equal(bl.items.length, 4);
+  assert.equal(bl.items.find((x) => x.value === FP).type, 'fp');
   assert.equal(bl.items.find((x) => x.value === '203.0.113.5').note, '刷接口');
   const j = await (await call(env, '/api/parses', { cookie })).json();
-  assert.deepEqual(j.items.map((x) => [x.ipBlocked, x.deviceBlocked]), [[true, false], [true, true], [false, false]]);
+  assert.deepEqual(j.items.map((x) => [x.ipBlocked, x.deviceBlocked, x.fpBlocked]), [[true, false, false], [true, true, true], [false, false, false]]);
   // 解析站那边立刻能拦（新 isolate）
   const pl = createParseLog('douyin');
   const req = new Request('https://x/api/parse?url=https://v.douyin.com/z', { headers: { 'cf-connecting-ip': '198.51.100.1', 'x-device-id': DEV } });
   assert.equal((await pl.wrap(req, env, { waitUntil() {} }, async () => new Response('{}'))).status, 403);
   r = await (await post('/api/unblock', { type: 'device', value: DEV })).json();
   assert.equal(r.ok, true);
-  assert.equal((await (await call(env, '/api/blocklist', { cookie })).json()).items.length, 2);
+  assert.equal((await (await call(env, '/api/blocklist', { cookie })).json()).items.length, 3);
+  // 拉黑指纹：只带指纹的请求也拦
+  const reqFp = new Request('https://x/api/parse?url=https://v.douyin.com/z', { headers: { 'cf-connecting-ip': '198.51.100.2', 'x-device-fp': FP } });
+  assert.equal((await createParseLog('douyin').wrap(reqFp, env, { waitUntil() {} }, async () => new Response('{}'))).status, 403);
+  r = await (await post('/api/unblock', { type: 'fp', value: FP })).json();
+  assert.equal(r.ok, true);
 });
 
 test('没绑定 D1：提示未绑定，其他功能不受影响；整个流程不碰 KV 非反馈键', async () => {

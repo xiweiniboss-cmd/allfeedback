@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createParseLog, plCleanUrl, plDevice, plIp64, PL_RETENTION_MS } from '../shared/parse-log.js';
+import { createParseLog, plCleanUrl, plDevice, plFp, plIp64, PL_RETENTION_MS } from '../shared/parse-log.js';
 import { fakeD1 } from './d1.mjs';
 
 const DEV = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
@@ -145,4 +145,48 @@ test('约 1% 的写入顺手删除 30 天前的记录', async () => {
   await drain();
   assert.equal(rows(d1).length, 3, '删掉 1 条旧的，新增 1 条');
   assert.ok(rows(d1).every((r) => r.ts >= t - PL_RETENTION_MS));
+});
+
+const FP = '0123456789abcdef0123456789abcdef';
+test('设备指纹：X-Device-Fp 只认 32 位十六进制，写进 fp 列；拉黑指纹 → 403', async () => {
+  const r = (v) => new Request('https://x/', { headers: v == null ? {} : { 'x-device-fp': v } });
+  assert.equal(plFp(r(FP.toUpperCase())), FP);
+  for (const bad of ['', FP + '0', FP.slice(1), 'g'.repeat(32), "' OR 1=1 --" + 'a'.repeat(21)]) assert.equal(plFp(r(bad)), '', bad);
+  const d1 = fakeD1(); const { ctx, drain } = ctxs();
+  const withFp = (fp, ip) => { const q = req('https://v.douyin.com/a/', { ip }); q.headers.set('x-device-fp', fp); return q; };
+  const pl = createParseLog('douyin');
+  const env = { PARSE_DB: d1 };
+  await pl.wrap(withFp(FP, '203.0.113.7'), env, ctx, async () => jsonResp({ ok: true }));
+  await pl.wrap(withFp('nope', '203.0.113.8'), env, ctx, async () => jsonResp({ ok: true }));
+  await drain();
+  assert.deepEqual(rows(d1).map((x) => x.fp), [FP, '']);
+  const BAD = 'fedcba9876543210fedcba9876543210';
+  d1.db.prepare("INSERT INTO blocklist VALUES ('fp', ?, '', 1)").run(BAD);
+  const pl2 = createParseLog('douyin');
+  let called = 0;
+  const rb = await pl2.wrap(withFp(BAD, '198.51.100.50'), env, ctx, async () => { called++; return jsonResp({ ok: true }); });
+  assert.equal(rb.status, 403);
+  assert.equal(called, 0);
+  assert.equal((await pl2.wrap(withFp(FP, '198.51.100.50'), env, ctx, async () => jsonResp({ ok: true }))).status, 200);
+  await drain();
+});
+
+test('只记有效链接：valid(input) 为 false 时照常处理但不记；拉黑照样生效', async () => {
+  const d1 = fakeD1(); const { ctx, drain } = ctxs();
+  const isDy = (t) => /^https?:\/\/([a-z0-9-]+\.)*(douyin|iesdouyin)\.com\//i.test((String(t).match(/https?:\/\/\S+/) || [''])[0]);
+  const pl = createParseLog('douyin', { valid: isDy });
+  const env = { PARSE_DB: d1 };
+  let called = 0;
+  const run = async () => { called++; return jsonResp({ ok: false, error: '只支持抖音链接' }, 400); };
+  for (const u of ['', '随便写点字', 'https://example.com/x', 'https://evil.com/douyin.com/x']) assert.equal((await pl.wrap(req(u), env, ctx, run)).status, 400);
+  assert.equal(called, 4, '站点自己照常 400');
+  await pl.wrap(req('复制 https://v.douyin.com/abc/ 打开'), env, ctx, async () => jsonResp({ ok: true }));
+  // valid 抛异常：当无效，不记
+  await createParseLog('douyin', { valid: () => { throw new Error('x'); } }).wrap(req('https://v.douyin.com/z/'), env, ctx, async () => jsonResp({ ok: true }));
+  await drain();
+  assert.deepEqual(rows(d1).map((x) => x.url), ['https://v.douyin.com/abc/']);
+  // 被拉黑的人发无效链接也拦
+  d1.db.prepare("INSERT INTO blocklist VALUES ('ip','198.51.100.77','',1)").run();
+  const pl3 = createParseLog('douyin', { valid: isDy });
+  assert.equal((await pl3.wrap(req('https://example.com/x', { ip: '198.51.100.77' }), env, ctx, run)).status, 403);
 });
