@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>统一反馈后台</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="login" class="login" hidden>
+  <form id="loginForm" class="login-card" autocomplete="on">
+    <h1>统一反馈后台</h1>
+    <p class="muted">汇总各解析站、DeepSeek 站和智驾模拟器的反馈</p>
+    <input type="password" id="loginKey" autocomplete="current-password" placeholder="管理密码" required>
+    <button type="submit" class="btn primary" id="loginBtn">登录</button>
+    <div class="err" id="loginErr" role="alert"></div>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <h1>反馈总览</h1>
+    <div class="top-actions">
+      <button type="button" class="btn ghost" id="refreshBtn">刷新</button>
+      <button type="button" class="btn ghost" id="logoutBtn">退出登录</button>
+    </div>
+  </header>
+
+  <section class="stats" id="stats" aria-label="统计">
+    <div class="stat-cards" id="statCards"></div>
+    <details class="days">
+      <summary>按天统计（最近 30 天）</summary>
+      <div class="table-wrap"><table id="dayTable"></table></div>
+    </details>
+    <p class="muted small" id="statNote"></p>
+  </section>
+
+  <section class="filters" aria-label="筛选">
+    <select id="fSite" aria-label="站点"><option value="">全部站点</option></select>
+    <select id="fKind" aria-label="问题类型"><option value="">全部类型</option></select>
+    <select id="fStatus" aria-label="处理状态">
+      <option value="">全部状态</option><option value="open">未处理</option><option value="done">已处理</option>
+    </select>
+    <select id="fOrder" aria-label="排序"><option value="desc">最新在前</option><option value="asc">最早在前</option></select>
+    <input type="search" id="fQ" placeholder="搜索内容 / 联系方式 / 链接 / IP" maxlength="100">
+    <button type="button" class="btn primary" id="searchBtn">筛选</button>
+  </section>
+
+  <div class="err" id="listErr" role="alert"></div>
+  <main id="list" class="list" aria-live="polite"></main>
+  <div class="more"><button type="button" class="btn ghost" id="moreBtn" hidden>加载更多</button></div>
+  <p class="muted small center" id="listNote"></p>
+</div>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>
