@@ -31,6 +31,8 @@
     layers: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
     today: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
     trend: 'M23 6l-9.5 9.5-5-5L1 18M17 6h6v6',
+    download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
+    broken: 'M2 2l20 20M10.41 10.41a2 2 0 1 1-2.83-2.83M21 15l-3.09-3.09M13.5 13.5L6 21M3 3a2 2 0 0 0-1 1.73V19a2 2 0 0 0 2 2h14.27M21 16V5a2 2 0 0 0-2-2H8',
   };
   function icon(name) {
     var s = document.createElementNS(SVGNS, 'svg');
@@ -68,6 +70,73 @@
     return Math.floor(d / 86400 / 365) + ' 年前';
   }
   function dayCN(ms) { return new Date(ms + 8 * 3600 * 1000).toISOString().slice(0, 10); }
+  function fmtCN(ms) { return new Date(ms + 8 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' '); }
+
+  /* ---------- 复制 ---------- */
+  function copyFallback(text) {
+    var ta = el('textarea'); ta.value = text; ta.setAttribute('readonly', '');
+    ta.className = 'clip-ta';
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+    var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+  function copyText(text, okMsg) {
+    var done = function (ok) { toast(ok ? (okMsg || '已复制') : '复制失败，请手动选择文字复制'); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(copyFallback(text)); });
+    } else done(copyFallback(text));
+  }
+  function summaryText(it) {
+    var sk = siteKey(it.site);
+    var g = it.geo || {}; var geo = [g.country, g.region, g.city].filter(Boolean).join(' · ');
+    var ipLine = it.ip ? it.ip + (geo ? '（' + geo + '）' : '') : geo;
+    var rows = [
+      ['站点', it.siteLabel || SITES[sk] || it.site],
+      ['时间', it.time ? fmtCN(it.time) + '（北京时间）' : ''],
+      ['类型', it.kind],
+      ['状态', it.status === 'done' ? '已处理' + (it.handledAt ? '（' + fmtCN(it.handledAt) + '）' : '') : '未处理'],
+      ['内容', it.message],
+      ['链接', it.link],
+      ['联系方式', it.contact],
+      ['来源页面', it.page],
+      ['IP / 地区', ipLine],
+      ['UA', it.ua],
+      ['附件', (it.attachments || []).map(function (a) { return a.name || a.key.split('/').pop(); }).join('、')],
+      ['编号', it.id],
+    ];
+    return rows.filter(function (r) { return r[1] != null && String(r[1]).trim() !== ''; })
+      .map(function (r) { var v = String(r[1]); return r[0] + '：' + (v.indexOf('\n') >= 0 ? '\n' + v : v); }).join('\n');
+  }
+
+  /* ---------- 附件下载 ---------- */
+  function fileUrl(a, download) {
+    var u = '/api/file?key=' + encodeURIComponent(a.key);
+    if (download) u += '&download=1&name=' + encodeURIComponent(a.name || a.key.split('/').pop());
+    return u;
+  }
+  // 只取 1 个字节探测文件是否还在，避免把 404 页面当成文件保存
+  async function probeFile(a) {
+    try {
+      var r = await fetch(fileUrl(a), { credentials: 'same-origin', cache: 'no-store', headers: { Range: 'bytes=0-0' } });
+      try { if (r.body && r.body.cancel) r.body.cancel(); } catch (e) {}
+      if (r.status === 401) showLogin('登录已过期，请重新登录');
+      return r.status === 416 ? 200 : r.status;
+    } catch (e) { return 0; }
+  }
+  function triggerDownload(a) {
+    var x = el('a'); x.href = fileUrl(a, true); x.setAttribute('download', a.name || a.key.split('/').pop()); x.rel = 'noopener';
+    x.hidden = true; document.body.appendChild(x); x.click(); setTimeout(function () { x.remove(); }, 1000);
+  }
+  function probeMsg(st) { return st === 404 ? '文件不存在' : st === 401 ? '登录已过期' : st === 0 ? '网络错误，下载失败' : '下载失败（HTTP ' + st + '）'; }
+  // 返回 true 表示已开始下载
+  async function downloadOne(a, onMissing) {
+    var st = await probeFile(a);
+    if (st >= 200 && st < 300) { triggerDownload(a); return true; }
+    if (st === 404 && onMissing) onMissing();
+    return st;
+  }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function confirmBox(title, text, okText) {
     return new Promise(function (resolve) {
       var m = $('modal'); $('modalTitle').textContent = title; $('modalText').textContent = text; $('modalOk').textContent = okText || '确定';
@@ -401,6 +470,53 @@
   }
   function updateNote() { $('listNote').textContent = '全部站点共 ' + state.total + ' 条反馈' + (state.more ? ' · 下滑加载更多' : ' · 已全部显示'); }
 
+  function attachment(a) {
+    var src = fileUrl(a);
+    var name = a.name || a.key.split('/').pop();
+    var wrap = el('div', 'att-item');
+    var box, media = null;
+    var isImg = /^image\/(png|jpe?g|pjpeg|gif|webp|heic|heif|avif|bmp)$/i.test(a.type), isVid = /^video\//i.test(a.type);
+    if (isImg) {
+      box = el('a', 'att'); box.href = src; box.target = '_blank'; box.rel = 'noopener noreferrer'; box.title = name + '（点击查看原图）';
+      media = el('img'); media.src = src; media.alt = name; media.loading = 'lazy'; box.appendChild(media);
+    } else if (isVid) {
+      box = el('div', 'att video-box'); wrap.classList.add('is-video');
+      media = el('video'); media.src = src; media.controls = true; media.preload = 'metadata'; media.setAttribute('playsinline', ''); box.appendChild(media);
+    } else {
+      box = el('a', 'att file'); box.href = fileUrl(a, true); box.setAttribute('download', name); box.rel = 'noopener noreferrer'; box.title = name;
+      box.appendChild(icon('file')); box.appendChild(el('span', null, name));
+    }
+    wrap.appendChild(box);
+    function setMissing(text) {
+      if (wrap.classList.contains('missing')) return;
+      wrap.classList.add('missing');
+      var m = el('div', 'att att-missing' + (isVid ? ' video-box' : '')); m.title = name + '：' + text;
+      m.appendChild(icon('broken')); m.appendChild(el('span', 'am-t', text)); m.appendChild(el('span', 'am-n', name));
+      box.replaceWith(m); box = m;
+    }
+    wrap._missing = function () { setMissing('附件已丢失'); };
+    if (media) {
+      var onErr = async function () {
+        var st = await probeFile(a);
+        if (st === 404) setMissing('附件已丢失');
+        else if (st !== 401 && !(st >= 200 && st < 300)) setMissing('无法加载');
+        else if (st >= 200 && st < 300 && isImg) setMissing('无法预览');
+      };
+      media.addEventListener('error', onErr);
+    }
+    var dl = el('button', 'att-dl'); dl.type = 'button'; dl.title = '下载原文件：' + name; dl.setAttribute('aria-label', '下载 ' + name);
+    dl.appendChild(icon('download'));
+    dl.addEventListener('click', async function (e) {
+      e.preventDefault(); e.stopPropagation();
+      dl.disabled = true;
+      var r = await downloadOne(a, wrap._missing);
+      dl.disabled = false;
+      if (r === true) toast('开始下载：' + name);
+      else if (r !== 401) toast(probeMsg(r));
+    });
+    wrap.appendChild(dl);
+    return wrap;
+  }
   function metaItem(ic, text, title) { var s = el('span'); s.appendChild(icon(ic)); s.appendChild(el('span', null, text)); if (title) s.title = title; return s; }
   function card(it) {
     var sk = siteKey(it.site);
@@ -420,27 +536,14 @@
       var ls = el('span', null, it.link); ls.title = it.link; lk.appendChild(ls);
       var cp = el('button', 'copy'); cp.type = 'button'; cp.title = '复制链接'; cp.setAttribute('aria-label', '复制链接'); cp.appendChild(icon('copy'));
       cp.addEventListener('click', function () {
-        if (navigator.clipboard) navigator.clipboard.writeText(it.link).then(function () { toast('已复制链接'); }, function () { toast('复制失败'); });
+        copyText(it.link, '已复制链接');
       });
       lk.appendChild(cp); d.appendChild(lk);
     }
-    if (it.attachments && it.attachments.length) {
+    var attList = it.attachments || [];
+    if (attList.length) {
       var atts = el('div', 'atts');
-      it.attachments.forEach(function (a) {
-        var src = '/api/file?key=' + encodeURIComponent(a.key);
-        var box;
-        if (/^image\/(png|jpe?g|pjpeg|gif|webp|heic|heif|avif|bmp)$/i.test(a.type)) {
-          box = el('a', 'att'); box.href = src; box.target = '_blank'; box.rel = 'noopener noreferrer'; box.title = (a.name || '图片') + '（点击查看原图）';
-          var img = el('img'); img.src = src; img.alt = a.name || '图片附件'; img.loading = 'lazy'; box.appendChild(img);
-        } else if (/^video\//i.test(a.type)) {
-          box = el('div', 'att video-box');
-          var v = el('video'); v.src = src; v.controls = true; v.preload = 'metadata'; v.setAttribute('playsinline', ''); box.appendChild(v);
-        } else {
-          box = el('a', 'att file'); box.href = src; box.setAttribute('download', a.name || 'attachment'); box.rel = 'noopener noreferrer';
-          box.appendChild(icon('file')); box.appendChild(el('span', null, a.name || '下载附件'));
-        }
-        atts.appendChild(box);
-      });
+      attList.forEach(function (a) { atts.appendChild(attachment(a)); });
       d.appendChild(atts);
     }
     var foot = el('div', 'fb-foot');
@@ -481,6 +584,28 @@
       toast('已删除' + (j.files ? '（含 ' + j.files + ' 个附件）' : '') + (j.fileErrors ? '，有 ' + j.fileErrors + ' 个附件没删掉' : ''));
       loadStats();
     });
+    var cpy = el('button', 'act-btn'); cpy.type = 'button'; cpy.title = '复制这条反馈的全部信息'; cpy.setAttribute('aria-label', '复制这条反馈的信息');
+    cpy.appendChild(icon('copy')); cpy.appendChild(el('span', null, '复制'));
+    cpy.addEventListener('click', function () { copyText(summaryText(it), '已复制'); });
+    acts.appendChild(cpy);
+    if (attList.length >= 2) {
+      var all = el('button', 'act-btn'); all.type = 'button'; all.title = '逐个下载全部 ' + attList.length + ' 个附件';
+      all.appendChild(icon('download')); all.appendChild(el('span', null, '下载全部'));
+      all.addEventListener('click', async function () {
+        all.disabled = true;
+        var ok = 0, missing = 0, fail = 0, boxes = d.querySelectorAll('.att-item');
+        for (var i = 0; i < attList.length; i++) {
+          var b = boxes[i];
+          toast('正在下载 ' + (i + 1) + ' / ' + attList.length + '…');
+          var r = await downloadOne(attList[i], function () { if (b && b._missing) b._missing(); });
+          if (r === true) { ok++; await wait(900); } else if (r === 404) missing++; else { fail++; if (r === 401) break; }
+        }
+        all.disabled = false;
+        toast(ok ? '已开始下载 ' + ok + ' 个文件' + (missing ? '，' + missing + ' 个文件不存在' : '') + (fail ? '，' + fail + ' 个失败' : '')
+          : (missing && !fail ? '文件不存在' : '下载失败'));
+      });
+      acts.appendChild(all);
+    }
     acts.appendChild(mark); acts.appendChild(del);
     foot.appendChild(acts);
     d.appendChild(foot);
