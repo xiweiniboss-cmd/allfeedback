@@ -59,6 +59,8 @@
       <div class="seg" id="segView" role="tablist" aria-label="切换视图">
         <button type="button" role="tab" data-v="fb" aria-selected="true" aria-checked="true">用户反馈</button>
         <button type="button" role="tab" data-v="pf" aria-selected="false" aria-checked="false">解析失败</button>
+        <button type="button" role="tab" data-v="pl" aria-selected="false" aria-checked="false">解析记录</button>
+        <button type="button" role="tab" data-v="bl" aria-selected="false" aria-checked="false">黑名单</button>
       </div>
     </div>
 
@@ -135,6 +137,44 @@
         <div id="pfSamples" class="pf-list" aria-live="polite"></div>
       </div>
       <p class="muted small note" id="pfNote">每个平台每天一条汇总，保留 35 天；同一时间段的大量失败会合并写入，样本只留每天最新 30 条。链接里的令牌类参数已去掉。</p>
+    </div>
+
+    <!-- 解析记录：谁解析了什么（D1 parse_log，保留 30 天） -->
+    <div id="plView" hidden>
+      <div class="toolbar pl-toolbar">
+        <select id="plSite" class="select" aria-label="站点"><option value="">全部站点</option></select>
+        <div class="seg" id="segPlResult" role="radiogroup" aria-label="结果">
+          <button type="button" role="radio" data-v="" aria-checked="true">全部</button>
+          <button type="button" role="radio" data-v="ok" aria-checked="false">成功</button>
+          <button type="button" role="radio" data-v="fail" aria-checked="false">失败</button>
+        </div>
+        <input type="search" id="plIp" class="input" placeholder="IP" maxlength="64" aria-label="按 IP 筛选">
+        <input type="search" id="plDev" class="input" placeholder="设备 ID" maxlength="64" aria-label="按设备 ID 筛选">
+        <label class="date-f"><span>从</span><input type="date" id="plFrom" class="input" aria-label="开始日期"></label>
+        <label class="date-f"><span>到</span><input type="date" id="plTo" class="input" aria-label="结束日期"></label>
+        <button type="button" class="btn ghost" id="plClear">清除筛选</button>
+      </div>
+      <div id="plState"></div>
+      <div class="panel pl-panel"><div id="plList" class="pl-list" aria-live="polite"></div></div>
+      <div class="more"><button type="button" class="btn ghost" id="plMore" hidden>加载更多</button></div>
+      <p class="muted small note">时间为北京时间；IP、归属地、设备 ID 只用于防滥用，记录保留 30 天。设备 ID 是浏览器本地生成的随机编号，清除浏览器数据后会变。IPv6 按 /64 网段拉黑。拉黑后最多 1 分钟在各解析站生效。</p>
+    </div>
+
+    <!-- 黑名单 -->
+    <div id="blView" hidden>
+      <form class="panel bl-add" id="blForm" novalidate>
+        <div class="panel-head"><h2>手动拉黑</h2></div>
+        <div class="bl-row">
+          <select id="blType" class="select" aria-label="类型"><option value="ip">IP</option><option value="device">设备 ID</option></select>
+          <input type="text" id="blValue" class="input grow" placeholder="IP 或设备 ID" maxlength="64" aria-label="要拉黑的 IP 或设备 ID">
+          <input type="text" id="blNote" class="input grow" placeholder="备注（可选）" maxlength="100" aria-label="备注">
+          <button type="submit" class="btn danger-fill">拉黑</button>
+        </div>
+      </form>
+      <div class="panel pl-panel">
+        <div class="panel-head"><h2>已拉黑</h2><span class="muted small" id="blCount"></span></div>
+        <div id="blList" class="pl-list"></div>
+      </div>
     </div>
   </div>
 </div>

@@ -15,7 +15,9 @@
 | `functions/_middleware.js` | 给所有响应加安全头 |
 | `lib/app.js` | 后端逻辑（不在 `public/` 里，不会被当静态文件公开） |
 | `shared/pf-recorder.js` | 解析失败记录器原件（各解析站内嵌同一份，见下文） |
-| `shared/pf-sync.mjs` | 把记录器同步到某个站点文件 / 检查是否一致 |
+| `shared/parse-log.js` | 解析记录 + 拉黑检查原件（各解析站内嵌同一份） |
+| `shared/parse_log.sql` | D1 数据库 `parse_log` 的建表语句 |
+| `shared/pf-sync.mjs` | 把 pf-recorder / parse-log 同步到某个站点文件 / 检查是否一致 |
 | `test/` | Node 测试：`npm test` |
 
 ## 接口
@@ -30,6 +32,9 @@
 | `DELETE /api/feedback` | JSON `{id}`，连同附件一起删除 |
 | `POST /api/status` | JSON `{id, status: "done"|"open"}` |
 | `GET /api/file?key=fb/...` | 查看附件 |
+| `GET /api/parses` | 解析记录（D1）：`site` `ip` `device` `from` `to`(北京日期) `result`(ok/fail) `before`(分页) `limit`(≤100)，最新在前 |
+| `GET /api/blocklist` | 黑名单 |
+| `POST /api/block` / `POST /api/unblock` | JSON `{type: "ip"|"device", value, note}`，同源；IPv6 统一按 /64 存 |
 | `GET /api/failures` | 解析失败统计（只读）：`days`(7/30) `site`；各站近 7 / 30 天次数、每天次数、主要原因、常见报错、最新 50 条样本 |
 
 ## 安全边界
@@ -69,3 +74,12 @@ if (url.pathname === '/api/parse') return pf.wrap(request, env, ctx, () => handl
 
 站点名不在上面的列表里时，再把它加进 `lib/app.js` 的 `PF_SITES` 和 `SITES`。检查各站内嵌代码是否和原件一致：
 `node shared/pf-sync.mjs --check ../douyinqushuiyintest/_worker.js …`
+
+## 解析记录与拉黑（D1）
+
+- 数据库：D1 `parse_log`（id `70f93ce3-4631-4987-ab6b-54188a73a134`），绑定名 `PARSE_DB`，各解析站生产环境和本站都要绑定。建表见 `shared/parse_log.sql`。
+- 各解析站 `/api/parse` 外面再包一层 `createParseLog('<站点>').wrap(...)`（见 `shared/parse-log.js`）：
+  - 先查黑名单（每个 isolate 缓存 60 秒，读 D1 超时 1.5 秒），命中返回 403 `{"error":"访问受限"}`；D1 不可用时放行。
+  - 每次解析记一行（成功、失败、4xx 都记）：站点、链接（去掉令牌类参数）、结果、状态码、原因、IP、归属地（request.cf）、设备 ID（请求头 `X-Device-Id`，必须是 UUID）、UA（≤200 字）。
+  - 写入在 `waitUntil` 里；约 1% 的写入顺手 `DELETE … WHERE ts < 30 天前`。
+- 不用 KV：解析记录和黑名单都在 D1，KV 写入一次都不增加。

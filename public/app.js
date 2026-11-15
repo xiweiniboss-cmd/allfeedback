@@ -6,7 +6,7 @@
   var KINDS = ['解析失败', '下载失败', '还有水印', '视频有问题', '图片有问题', '其他'];
   var SITE_KEYS = ['douyin', 'xiaohongshu', 'bilibili', 'youtube', 'tiktok', 'kuaishou', 'weibo', 'deepseek', 'zhijia', 'brake', 'other'];
   var SITES = { douyin: '抖音', xiaohongshu: '小红书', bilibili: 'B站', youtube: 'YouTube', tiktok: 'TikTok', kuaishou: '快手', weibo: '微博', deepseek: 'DeepSeek', zhijia: '智驾模拟器', brake: '刹车模拟器', other: '其他' };
-  var state = { cursor: null, loading: false, site: '', status: '', order: 'desc', total: 0, more: false, stats: null, seq: 0, view: 'fb', pfSite: '', pfRange: 30, pf: null, pfSeq: 0 };
+  var state = { pl: { site: '', result: '', cursor: null, seq: 0 }, cursor: null, loading: false, site: '', status: '', order: 'desc', total: 0, more: false, stats: null, seq: 0, view: 'fb', pfSite: '', pfRange: 30, pf: null, pfSeq: 0 };
   var PF_SITES = ['douyin', 'xiaohongshu', 'bilibili', 'youtube', 'tiktok', 'kuaishou', 'weibo'];
 
   /* ---------- 工具 ---------- */
@@ -632,13 +632,20 @@
 
   /* ---------- 解析失败（只读） ---------- */
   var pfChart = makeStackChart('pfChart', 'pfChartLegend', { unit: '次', none: '没有失败' });
+  var VIEWS = ['fb', 'pf', 'pl', 'bl'];
   function setView(v) {
+    if (VIEWS.indexOf(v) < 0) v = 'fb';
     state.view = v;
     $('segView').querySelectorAll('button').forEach(function (x) { var on = x.getAttribute('data-v') === v; x.setAttribute('aria-checked', on ? 'true' : 'false'); x.setAttribute('aria-selected', on ? 'true' : 'false'); });
     $('fbView').hidden = v !== 'fb';
     $('pfView').hidden = v !== 'pf';
-    try { history.replaceState(null, '', v === 'pf' ? '#failures' : location.pathname); } catch (e) {}
+    $('plView').hidden = v !== 'pl';
+    $('blView').hidden = v !== 'bl';
+    var HASH = { pf: '#failures', pl: '#parses', bl: '#blocklist' };
+    try { history.replaceState(null, '', HASH[v] || location.pathname); } catch (e) {}
     if (v === 'pf') { pfTitle(); if (state.pf) renderPf(state.pf); loadPf(); }
+    else if (v === 'pl') { plTitle(); renderPlNav(); loadPl(true); }
+    else if (v === 'bl') { $('pageTitle').textContent = '黑名单'; $('pageSub').textContent = '被拉黑的 IP / 设备在所有解析站都无法解析（返回「访问受限」）'; renderPlNav(); loadBl(); }
     else { setSiteTitle(); if (state.stats) renderNav(state.stats); }
   }
   function pfTitle() {
@@ -771,10 +778,195 @@
       nav.appendChild(b);
     });
   }
-  seg('segView', function (v) { setView(v === 'pf' ? 'pf' : 'fb'); });
+  seg('segView', function (v) { setView(v); });
   seg('segPfRange', function (v) { state.pfRange = v === '7' ? 7 : 30; loadPf(); });
 
-  function reloadAll() { renderKpisLoading(); loadStats(); loadPage(true); if (state.view === 'pf') loadPf(); }
+  /* ---------- 解析记录 / 黑名单（D1） ---------- */
+  function plTitle() {
+    var s = state.pl.site;
+    $('pageTitle').textContent = s ? (SITES[s] || s) + ' 解析记录' : '解析记录';
+    $('pageSub').textContent = '谁解析了什么：链接、结果、IP、归属地、设备 ID（保留 30 天）';
+  }
+  function renderPlNav() {
+    var nav = $('siteNav'); nav.textContent = '';
+    if (state.view === 'bl') { nav.appendChild(el('div', 'nav-label', '黑名单对所有解析站生效')); return; }
+    nav.appendChild(el('div', 'nav-label', '解析站'));
+    [''].concat(PF_SITES).forEach(function (k) {
+      var b = el('button', 'nav-item ' + (k ? 's-' + siteKey(k) : 's-all')); b.type = 'button';
+      b.setAttribute('aria-current', state.pl.site === k ? 'true' : 'false');
+      b.appendChild(el('span', 'dot')); b.appendChild(el('span', 'name', k ? (SITES[k] || k) : '全部站点'));
+      b.addEventListener('click', function () { setPlFilter('site', k); });
+      nav.appendChild(b);
+    });
+  }
+  function setPlFilter(k, v) {
+    if (k === 'site') { state.pl.site = v; $('plSite').value = v; renderPlNav(); plTitle(); }
+    if (k === 'ip') $('plIp').value = v;
+    if (k === 'device') $('plDev').value = v;
+    loadPl(true);
+  }
+  function plQuery() {
+    var p = new URLSearchParams();
+    if (state.pl.site) p.set('site', state.pl.site);
+    if (state.pl.result) p.set('result', state.pl.result);
+    if ($('plIp').value.trim()) p.set('ip', $('plIp').value.trim());
+    if ($('plDev').value.trim()) p.set('device', $('plDev').value.trim());
+    if ($('plFrom').value) p.set('from', $('plFrom').value);
+    if ($('plTo').value) p.set('to', $('plTo').value);
+    p.set('limit', '50');
+    if (state.pl.cursor) p.set('before', String(state.pl.cursor));
+    return '/api/parses?' + p.toString();
+  }
+  async function loadPl(reset) {
+    var my = ++state.pl.seq;
+    if (reset) { state.pl.cursor = null; $('plList').textContent = ''; $('plState').textContent = ''; $('plList').appendChild(skeletons()); $('plMore').hidden = true; }
+    $('plMore').disabled = true;
+    var j = await api(plQuery());
+    if (my !== state.pl.seq) return;
+    $('plMore').disabled = false;
+    if (reset) $('plList').textContent = '';
+    if (!j.ok) {
+      if (j.status !== 401) $('plList').appendChild(stateBox('error', '加载失败', j.error || '请稍后重试', '重试', function () { loadPl(true); }));
+      return;
+    }
+    if (j.siteNames) SITES = j.siteNames;
+    j.items.forEach(function (x) { $('plList').appendChild(plRow(x)); });
+    state.pl.cursor = j.cursor;
+    $('plMore').hidden = !j.more;
+    if (!$('plList').querySelector('.pl-row')) {
+      var filtered = state.pl.site || state.pl.result || $('plIp').value.trim() || $('plDev').value.trim() || $('plFrom').value || $('plTo').value;
+      $('plList').appendChild(stateBox('empty', filtered ? '没有匹配的解析记录' : '还没有解析记录', filtered ? '换个筛选条件试试' : '用户在各解析站解析后会出现在这里', filtered ? '清除筛选' : '', clearPl));
+    }
+  }
+  function clearPl() {
+    ['plIp', 'plDev', 'plFrom', 'plTo'].forEach(function (id) { $(id).value = ''; });
+    state.pl.result = ''; $('segPlResult').querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-checked', x.getAttribute('data-v') === '' ? 'true' : 'false'); });
+    setPlFilter('site', '');
+  }
+  function shortDev(d) { return d ? d.slice(0, 8) + '…' + d.slice(-4) : ''; }
+  async function doBlock(type, value, note, label) {
+    if (!(await confirmBox('拉黑这个' + (type === 'ip' ? ' IP' : '设备') + '？', label + ' 将无法在任何解析站解析（返回「访问受限」），最多 1 分钟后生效，可以在「黑名单」里解除。', '拉黑'))) return false;
+    var j = await api('/api/block', { method: 'POST', body: { type: type, value: value, note: note } });
+    if (!j.ok) { if (j.status !== 401) toast('拉黑失败：' + (j.error || '')); return false; }
+    toast('已拉黑 ' + j.value);
+    return true;
+  }
+  async function doUnblock(type, value) {
+    var j = await api('/api/unblock', { method: 'POST', body: { type: type, value: value } });
+    if (!j.ok) { if (j.status !== 401) toast('解除失败：' + (j.error || '')); return false; }
+    toast('已解除 ' + value);
+    return true;
+  }
+  function plRow(x) {
+    var r = el('div', 'pl-row s-' + siteKey(x.site));
+    var head = el('div', 'pf-head');
+    head.appendChild(el('span', 'chip site', x.siteLabel || SITES[x.site] || x.site));
+    head.appendChild(el('span', 'chip ' + (x.ok ? 'res-ok' : 'res-fail'), x.ok ? '成功' : '失败' + (x.status ? ' · ' + x.status : '')));
+    if (x.ipBlocked || x.deviceBlocked) head.appendChild(el('span', 'chip res-block', '已拉黑'));
+    var tm = el('span', 'fb-time');
+    if (x.ts) { tm.appendChild(el('b', null, fmtRel(x.ts))); tm.appendChild(document.createTextNode(' · ' + fmtAbs(x.ts))); tm.title = '北京时间 ' + fmtAbs(x.ts); }
+    head.appendChild(tm);
+    r.appendChild(head);
+    var lk = el('div', 'fb-link'); lk.appendChild(icon('link'));
+    var ls = el('span', null, x.url || '（没有识别到链接）'); ls.title = x.url || ''; lk.appendChild(ls);
+    if (x.url) {
+      var cp = el('button', 'copy'); cp.type = 'button'; cp.title = '复制链接'; cp.setAttribute('aria-label', '复制链接'); cp.appendChild(icon('copy'));
+      cp.addEventListener('click', function () { copyText(x.url, '已复制链接'); });
+      lk.appendChild(cp);
+    }
+    r.appendChild(lk);
+    if (!x.ok && x.reason) r.appendChild(el('div', 'pf-err', x.reason));
+    var foot = el('div', 'fb-foot');
+    var meta = el('div', 'meta');
+    var geo = [x.country, x.region, x.city].filter(Boolean).join(' · ');
+    if (x.ip) {
+      var ipb = el('button', 'meta-link'); ipb.type = 'button'; ipb.title = '只看这个 IP';
+      ipb.appendChild(icon('pin')); ipb.appendChild(el('span', null, x.ip + (geo ? '  ' + geo : '')));
+      ipb.addEventListener('click', function () { setPlFilter('ip', x.ip); });
+      meta.appendChild(ipb);
+    } else if (geo) meta.appendChild(metaItem('pin', geo, '归属地'));
+    if (x.device) {
+      var db = el('button', 'meta-link'); db.type = 'button'; db.title = '设备 ID：' + x.device + '（点击只看这个设备）';
+      db.appendChild(icon('hash')); db.appendChild(el('span', null, '设备 ' + shortDev(x.device)));
+      db.addEventListener('click', function () { setPlFilter('device', x.device); });
+      meta.appendChild(db);
+    } else meta.appendChild(metaItem('hash', '无设备 ID', '旧版页面或非浏览器请求，没有带设备 ID'));
+    if (x.ua) meta.appendChild(metaItem('globe', x.ua.slice(0, 60) + (x.ua.length > 60 ? '…' : ''), x.ua));
+    foot.appendChild(meta);
+    var acts = el('div', 'fb-actions');
+    function blockBtn(type, value, blocked, text, label) {
+      var b = el('button', 'act-btn' + (blocked ? ' on' : ' danger')); b.type = 'button';
+      b.textContent = blocked ? '已拉黑' + text : '拉黑' + text;
+      b.title = blocked ? '点击解除拉黑' : '拉黑这个' + text;
+      b.addEventListener('click', async function () {
+        b.disabled = true;
+        var ok = blocked ? await doUnblock(type, value) : await doBlock(type, value, '从解析记录拉黑（' + (x.siteLabel || x.site) + ' ' + fmtAbs(x.ts) + '）', label);
+        b.disabled = false;
+        if (ok) loadPl(true);
+      });
+      return b;
+    }
+    if (x.ipBlockValue) acts.appendChild(blockBtn('ip', x.ipBlockValue, x.ipBlocked, ' IP', x.ipBlockValue));
+    if (x.device) acts.appendChild(blockBtn('device', x.device, x.deviceBlocked, '设备', '设备 ' + x.device));
+    foot.appendChild(acts);
+    r.appendChild(foot);
+    return r;
+  }
+  async function loadBl() {
+    var box = $('blList'); box.textContent = ''; box.appendChild(skeletons());
+    var j = await api('/api/blocklist');
+    box.textContent = '';
+    if (!j.ok) { if (j.status !== 401) box.appendChild(stateBox('error', '加载失败', j.error || '请稍后重试', '重试', loadBl)); return; }
+    $('blCount').textContent = j.items.length ? '共 ' + j.items.length + ' 个' : '';
+    if (!j.items.length) { box.appendChild(stateBox('empty', '黑名单是空的', '在「解析记录」里点「拉黑 IP」或「拉黑设备」，或在上面手动添加')); return; }
+    j.items.forEach(function (x) {
+      var r = el('div', 'pl-row bl-item');
+      var head = el('div', 'pf-head');
+      head.appendChild(el('span', 'chip kind', x.type === 'ip' ? 'IP' : '设备'));
+      head.appendChild(el('span', 'bl-val', x.value));
+      var tm = el('span', 'fb-time'); if (x.createdAt) { tm.appendChild(el('b', null, fmtRel(x.createdAt))); tm.appendChild(document.createTextNode(' · ' + fmtAbs(x.createdAt))); }
+      head.appendChild(tm);
+      r.appendChild(head);
+      var foot = el('div', 'fb-foot');
+      var meta = el('div', 'meta'); meta.appendChild(el('span', null, x.note || '（没有备注）')); foot.appendChild(meta);
+      var acts = el('div', 'fb-actions');
+      var see = el('button', 'act-btn'); see.type = 'button'; see.textContent = '看记录';
+      see.addEventListener('click', function () {
+        $('plIp').value = x.type === 'ip' && x.value.indexOf('/64') < 0 ? x.value : ''; $('plDev').value = x.type === 'device' ? x.value : '';
+        setView('pl');
+      });
+      if (!(x.type === 'ip' && x.value.indexOf('/64') >= 0)) acts.appendChild(see);
+      var un = el('button', 'act-btn'); un.type = 'button'; un.textContent = '解除拉黑';
+      un.addEventListener('click', async function () {
+        if (!(await confirmBox('解除拉黑？', x.value + ' 最多 1 分钟后可以重新解析。', '解除'))) return;
+        un.disabled = true; var ok = await doUnblock(x.type, x.value); un.disabled = false; if (ok) loadBl();
+      });
+      acts.appendChild(un);
+      foot.appendChild(acts); r.appendChild(foot);
+      box.appendChild(r);
+    });
+  }
+  (function initPl() {
+    PF_SITES.forEach(function (k) { var o = el('option', null, SITES[k] || k); o.value = k; $('plSite').appendChild(o); });
+    $('plSite').addEventListener('change', function () { setPlFilter('site', $('plSite').value); });
+    seg('segPlResult', function (v) { state.pl.result = v; loadPl(true); });
+    var t;
+    ['plIp', 'plDev'].forEach(function (id) {
+      $(id).addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { loadPl(true); }, 400); });
+      $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') { clearTimeout(t); loadPl(true); } });
+    });
+    ['plFrom', 'plTo'].forEach(function (id) { $(id).addEventListener('change', function () { loadPl(true); }); });
+    $('plClear').addEventListener('click', clearPl);
+    $('plMore').addEventListener('click', function () { loadPl(false); });
+    $('blForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var type = $('blType').value, v = $('blValue').value.trim();
+      if (!v) { toast('请填写要拉黑的 ' + (type === 'ip' ? 'IP' : '设备 ID')); return; }
+      if (await doBlock(type, v, $('blNote').value.trim(), v)) { $('blValue').value = ''; $('blNote').value = ''; loadBl(); }
+    });
+  })();
+
+  function reloadAll() { renderKpisLoading(); loadStats(); loadPage(true); if (state.view === 'pf') loadPf(); if (state.view === 'pl') loadPl(true); if (state.view === 'bl') loadBl(); }
   var qTimer;
   $('fQ').addEventListener('input', function () { clearTimeout(qTimer); qTimer = setTimeout(function () { loadPage(true); }, 350); });
   $('fQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') { clearTimeout(qTimer); loadPage(true); } });
@@ -793,7 +985,7 @@
   paintThemeButtons();
 
   api('/api/me').then(function (j) {
-    if (j.ok && j.admin) { showApp(); reloadAll(); if (location.hash === '#failures') setView('pf'); }
+    if (j.ok && j.admin) { showApp(); reloadAll(); var hv = { '#failures': 'pf', '#parses': 'pl', '#blocklist': 'bl' }[location.hash]; if (hv) setView(hv); }
     else showLogin(j.ok && j.configured === false ? '本站还没配置管理密码' : '');
   });
 })();
