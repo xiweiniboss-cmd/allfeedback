@@ -6,7 +6,8 @@
   var KINDS = ['解析失败', '下载失败', '还有水印', '视频有问题', '图片有问题', '其他'];
   var SITE_KEYS = ['douyin', 'xiaohongshu', 'bilibili', 'youtube', 'tiktok', 'kuaishou', 'weibo', 'deepseek', 'zhijia', 'brake', 'other'];
   var SITES = { douyin: '抖音', xiaohongshu: '小红书', bilibili: 'B站', youtube: 'YouTube', tiktok: 'TikTok', kuaishou: '快手', weibo: '微博', deepseek: 'DeepSeek', zhijia: '智驾模拟器', brake: '刹车模拟器', other: '其他' };
-  var state = { cursor: null, loading: false, site: '', status: '', order: 'desc', total: 0, more: false, stats: null, seq: 0 };
+  var state = { cursor: null, loading: false, site: '', status: '', order: 'desc', total: 0, more: false, stats: null, seq: 0, view: 'fb', pfSite: '', pfRange: 30, pf: null, pfSeq: 0 };
+  var PF_SITES = ['douyin', 'xiaohongshu', 'bilibili', 'youtube', 'tiktok', 'kuaishou', 'weibo'];
 
   /* ---------- 工具 ---------- */
   var ICONS = {
@@ -236,7 +237,8 @@
     k.appendChild(kpi('未处理', j.open, '已处理 ' + j.done, 'alert', 'warn'));
     k.appendChild(kpi('今日新增', todayN, '北京时间 ' + today.slice(5).replace('-', '/'), 'today', 'ok'));
     k.appendChild(kpi('近 7 天', week, '日均 ' + (week / 7).toFixed(1), 'trend', 'pink'));
-    renderNav(j); renderDist(j); renderChart(byDay);
+    if (state.view === 'fb') renderNav(j);
+    renderDist(j); renderChart(byDay);
     $('statNote').textContent = j.truncated ? '记录较多，统计只计算了最新 ' + j.counted + ' 条。' : '';
   }
   function fillKinds(j) {
@@ -278,14 +280,22 @@
   /* ---------- 最近 30 天图表：按站点堆叠的柱状图 ---------- */
   // 尺寸跟着容器走：ResizeObserver 监听 #chart，容器变大变小（面板被各站分布撑高、侧边栏收起、横竖屏）都会重画；
   // 容器还没显示（宽度为 0）时不画，等显示后 ResizeObserver 会再触发一次。
-  var lastByDay = null, chartRaf = 0;
-  function scheduleChart() {
-    if (!lastByDay) return;
-    cancelAnimationFrame(chartRaf);
-    chartRaf = requestAnimationFrame(function () { renderChart(lastByDay); });
+  // 反馈图（#chart）和解析失败图（#pfChart）共用同一套画法：makeStackChart 返回 render(byDay, order)
+  function makeStackChart(boxId, legendId, words) {
+    var lastByDay = null, lastOrder = [], raf = 0;
+    function schedule() {
+      if (!lastByDay) return;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(function () { draw(lastByDay, lastOrder); });
+    }
+    if (window.ResizeObserver) new ResizeObserver(schedule).observe($(boxId));
+    else window.addEventListener('resize', schedule);
+    function draw(byDay, order) {
+      lastByDay = byDay; lastOrder = order || [];
+      drawStack($(boxId), $(legendId), byDay, lastOrder, words);
+    }
+    return draw;
   }
-  if (window.ResizeObserver) new ResizeObserver(scheduleChart).observe($('chart'));
-  else window.addEventListener('resize', scheduleChart);
   var WEEK = ['日', '一', '二', '三', '四', '五', '六'];
   function niceTicks(maxN) {
     // 整数刻度，最多约 5 格；顶部留一格余量，数据少（比如最多 3 条）时就是 0,1,2,3,4
@@ -296,14 +306,11 @@
     var out = []; for (var v = 0; v <= top; v += step) out.push(v);
     return out;
   }
-  function renderChart(byDay) {
-    lastByDay = byDay;
-    var box = $('chart');
+  function drawStack(box, legend, byDay, order, words) {
     var W = Math.round(box.clientWidth), H = Math.round(box.clientHeight);
     if (!W || !H) return; // 还没显示，等 ResizeObserver
     box.textContent = '';
-    // 站点堆叠顺序：和「各站分布」一致（总数多的在下面）
-    var order = (state.stats && state.stats.sites ? state.stats.sites.map(function (x) { return x.site; }) : []);
+    // 站点堆叠顺序：和右侧分布一致（总数多的在下面）
     var days = [];
     for (var i = 29; i >= 0; i--) {
       var d = dayCN(Date.now() - i * 86400000), rec = byDay[d] || { total: 0, sites: {} };
@@ -313,7 +320,7 @@
       days.push({ day: d, n: rec.total || 0, parts: parts, today: i === 0 });
     }
     var sum = days.reduce(function (a, b) { return a + b.n; }, 0);
-    $('chartLegend').textContent = '共 ' + sum + ' 条';
+    legend.textContent = '共 ' + sum + ' ' + words.unit;
     var ticks = niceTicks(Math.max.apply(null, days.map(function (x) { return x.n; })));
     var top = ticks[ticks.length - 1];
     // 边距：左边给 y 轴数字，右边留够最后一个日期标签（今天）的一半宽度，柱子和标签都不会被裁掉
@@ -339,7 +346,7 @@
       cols.appendChild(svgEl('rect', { x: x0 + slot * i, y: T, width: slot, height: plotH, class: 'col', 'data-i': i }));
       if (d.n) {
         var hTot = baseY - yOf(d.n);
-        var cid = 'afc' + i;
+        var cid = box.id + '-c' + i;
         var cp = svgEl('clipPath', { id: cid });
         cp.appendChild(svgEl('rect', { x: bx, y: baseY - hTot, width: bw, height: hTot + 4, rx: Math.min(3, bw / 2) }));
         defs.appendChild(cp);
@@ -371,7 +378,7 @@
       tip.textContent = '';
       var dt = new Date(d.day + 'T00:00:00Z');
       tip.appendChild(el('div', 'tip-date', (d.today ? '今天 · ' : '') + d.day.slice(5).replace('-', '月') + '日 周' + WEEK[dt.getUTCDay()]));
-      tip.appendChild(el('div', 'tip-total', d.n ? '合计 ' + d.n + ' 条' : '没有反馈'));
+      tip.appendChild(el('div', 'tip-total', d.n ? '合计 ' + d.n + ' ' + words.unit : words.none));
       d.parts.slice().sort(function (a, b) { return b.n - a.n; }).forEach(function (pt) {
         var row = el('div', 'tip-row s-' + siteKey(pt.site));
         row.appendChild(el('span', 'tip-dot'));
@@ -394,11 +401,20 @@
     box.appendChild(svg); box.appendChild(tip);
   }
 
+  var feedbackChart = makeStackChart('chart', 'chartLegend', { unit: '条', none: '没有反馈' });
+  function renderChart(byDay) {
+    feedbackChart(byDay, state.stats && state.stats.sites ? state.stats.sites.map(function (x) { return x.site; }) : []);
+  }
+
   /* ---------- 列表 ---------- */
-  function setSite(s) {
-    state.site = s;
+  function setSiteTitle() {
+    var s = state.site;
     $('pageTitle').textContent = s ? (SITES[s] || s) + ' 反馈' : '全部反馈';
     $('pageSub').textContent = s ? '只看来自「' + (SITES[s] || s) + '」的反馈' : '所有站点的用户反馈';
+  }
+  function setSite(s) {
+    state.site = s;
+    setSiteTitle();
     document.querySelectorAll('.nav-item').forEach(function (b) { b.setAttribute('aria-current', 'false'); });
     var cur = document.querySelector('.nav-item.' + (s ? 's-' + siteKey(s) : 's-all')); if (cur) cur.setAttribute('aria-current', 'true');
     loadPage(true);
@@ -613,7 +629,152 @@
     return d;
   }
 
-  function reloadAll() { renderKpisLoading(); loadStats(); loadPage(true); }
+
+  /* ---------- 解析失败（只读） ---------- */
+  var pfChart = makeStackChart('pfChart', 'pfChartLegend', { unit: '次', none: '没有失败' });
+  function setView(v) {
+    state.view = v;
+    $('segView').querySelectorAll('button').forEach(function (x) { var on = x.getAttribute('data-v') === v; x.setAttribute('aria-checked', on ? 'true' : 'false'); x.setAttribute('aria-selected', on ? 'true' : 'false'); });
+    $('fbView').hidden = v !== 'fb';
+    $('pfView').hidden = v !== 'pf';
+    try { history.replaceState(null, '', v === 'pf' ? '#failures' : location.pathname); } catch (e) {}
+    if (v === 'pf') { pfTitle(); if (state.pf) renderPf(state.pf); loadPf(); }
+    else { setSiteTitle(); if (state.stats) renderNav(state.stats); }
+  }
+  function pfTitle() {
+    var s = state.pfSite;
+    $('pageTitle').textContent = s ? (SITES[s] || s) + ' 解析失败' : '解析失败';
+    $('pageSub').textContent = s ? '只看「' + (SITES[s] || s) + '」解析站的失败记录' : '各解析站解析失败的自动记录（不是用户提交的反馈）';
+  }
+  function setPfSite(s) {
+    state.pfSite = s; pfTitle();
+    document.querySelectorAll('.nav-item').forEach(function (b) { b.setAttribute('aria-current', b.getAttribute('data-site') === s ? 'true' : 'false'); });
+    loadPf();
+  }
+  function renderPfKpisLoading() {
+    var k = $('pfKpis'); k.textContent = '';
+    ['今日失败', '近 7 天', '近 30 天', '失败最多'].forEach(function (x) { k.appendChild(kpi(x, null, '', 'alert')); });
+  }
+  async function loadPf() {
+    var my = ++state.pfSeq;
+    if (!state.pf) renderPfKpisLoading();
+    var q = '/api/failures?days=' + state.pfRange + (state.pfSite ? '&site=' + encodeURIComponent(state.pfSite) : '');
+    var j = await api(q);
+    if (my !== state.pfSeq) return;
+    if (!j.ok) {
+      if (j.status !== 401) { var b = $('pfSamples'); b.textContent = ''; b.appendChild(stateBox('error', '加载失败', j.error || '请稍后重试', '重试', loadPf)); }
+      return;
+    }
+    state.pf = j;
+    if (state.view === 'pf') renderPf(j);
+  }
+  function renderPf(j) {
+    if (j.siteNames) SITES = j.siteNames;
+    var all = j.sites || [];
+    var sel = state.pfSite ? all.filter(function (x) { return x.site === state.pfSite; }) : all;
+    var sum = function (k) { return sel.reduce(function (a, x) { return a + (x[k] || 0); }, 0); };
+    var worst = all.filter(function (x) { return x.n30 > 0; })[0];
+    var k = $('pfKpis'); k.textContent = '';
+    k.appendChild(kpi('今日失败', sum('today'), '北京时间 ' + dayCN(Date.now()).slice(5).replace('-', '/'), 'alert'));
+    k.appendChild(kpi('近 7 天', sum('n7'), '日均 ' + (sum('n7') / 7).toFixed(1), 'trend'));
+    k.appendChild(kpi('近 30 天', sum('n30'), (state.pfSite ? '' : all.filter(function (x) { return x.n30; }).length + ' 个平台有失败'), 'layers'));
+    k.appendChild(kpi('失败最多', worst ? worst.label : '—', worst ? '30 天 ' + worst.n30 + ' 次' : '最近 30 天没有失败', 'alert'));
+    renderPfNav(j);
+    // 图表：按天堆叠
+    var byDay = {}; (j.days || []).forEach(function (d) { byDay[d.day] = d; });
+    var order = all.map(function (x) { return x.site; });
+    pfChart(byDay, order);
+    // 各平台
+    var dist = $('pfDist'); dist.textContent = '';
+    var key = state.pfRange === 7 ? 'n7' : 'n30';
+    var rows = all.filter(function (x) { return x[key] > 0 || PF_SITES.indexOf(x.site) < 6; });
+    var max = Math.max.apply(null, [1].concat(rows.map(function (x) { return x[key]; })));
+    rows.forEach(function (x) {
+      var r = el('button', 'dist-row s-' + siteKey(x.site) + (state.pfSite && state.pfSite !== x.site ? ' dim' : '')); r.type = 'button';
+      r.title = x.label + '：近 7 天 ' + x.n7 + ' 次，近 30 天 ' + x.n30 + ' 次';
+      r.appendChild(el('span', null, x.label));
+      var bar = el('span', 'dist-bar'); var f = el('i'); f.style.width = (x[key] ? Math.max(3, Math.round(x[key] / max * 100)) : 0) + '%'; bar.appendChild(f);
+      r.appendChild(bar); r.appendChild(el('b', null, x[key]));
+      r.addEventListener('click', function () { setPfSite(state.pfSite === x.site ? '' : x.site); });
+      dist.appendChild(r);
+    });
+    // 原因
+    var rb = $('pfReasons'); rb.textContent = '';
+    $('pfReasonNote').textContent = '近 ' + j.range + ' 天 · 共 ' + (j.total || 0) + ' 次';
+    if (!j.reasons || !j.reasons.length) rb.appendChild(el('p', 'muted small', '近 ' + j.range + ' 天没有解析失败'));
+    else {
+      var rmax = j.reasons[0].n;
+      j.reasons.forEach(function (x) {
+        var r = el('div', 'dist-row reason'); r.title = x.label + '：' + x.n + ' 次';
+        r.appendChild(el('span', null, PF_REASON_LABEL[x.code] || x.label));
+        var bar = el('span', 'dist-bar'); var f = el('i'); f.style.width = Math.max(3, Math.round(x.n / rmax * 100)) + '%'; bar.appendChild(f);
+        r.appendChild(bar); r.appendChild(el('b', null, x.n));
+        rb.appendChild(r);
+      });
+    }
+    var mb = $('pfMsgs'); mb.textContent = '';
+    if (!j.msgs || !j.msgs.length) mb.appendChild(el('li', 'muted small empty', '暂无'));
+    (j.msgs || []).forEach(function (x) {
+      var li = el('li'); li.appendChild(el('span', 'pf-msg', x.msg)); li.appendChild(el('b', null, x.n)); li.title = x.msg; mb.appendChild(li);
+    });
+    // 最新样本
+    var box = $('pfSamples'); box.textContent = '';
+    var smp = j.samples || [];
+    $('pfSampleNote').textContent = smp.length ? '最近 ' + smp.length + ' 条' : '';
+    if (!smp.length) { box.appendChild(stateBox('empty', '没有失败记录', state.pfSite ? '这个平台近 ' + j.range + ' 天没有解析失败' : '近 ' + j.range + ' 天各解析站都没有解析失败')); return; }
+    var FIRST = 10;
+    smp.slice(0, FIRST).forEach(function (x) { box.appendChild(pfRow(x)); });
+    if (smp.length > FIRST) {
+      var mw = el('div', 'more'); var mbtn = el('button', 'btn ghost', '显示全部 ' + smp.length + ' 条'); mbtn.type = 'button';
+      mbtn.addEventListener('click', function () { mw.remove(); smp.slice(FIRST).forEach(function (x) { box.appendChild(pfRow(x)); }); });
+      mw.appendChild(mbtn); box.appendChild(mw);
+    }
+  }
+  var PF_REASON_LABEL = { timeout: '超时', upstream_http: '上游接口报错', upstream_quota: '上游额度 / 限流', no_media: '没找到视频', network: '网络错误', bad_upstream: '上游返回格式异常', config: '站点配置缺失', exception: '程序异常', other: '其他' };
+  function pfRow(x) {
+    var r = el('div', 'pf-row s-' + siteKey(x.site));
+    var head = el('div', 'pf-head');
+    head.appendChild(el('span', 'chip site', x.siteLabel || SITES[x.site] || x.site));
+    head.appendChild(el('span', 'chip kind', PF_REASON_LABEL[x.code] || x.code));
+    var codes = [];
+    if (x.up) codes.push('上游 HTTP ' + x.up);
+    if (x.st) codes.push('本站返回 ' + x.st);
+    if (codes.length) head.appendChild(el('span', 'pf-code', codes.join(' · ')));
+    var tm = el('span', 'fb-time');
+    if (x.t) { tm.appendChild(el('b', null, fmtRel(x.t))); tm.appendChild(document.createTextNode(' · ' + fmtAbs(x.t))); tm.title = '北京时间 ' + fmtAbs(x.t); }
+    head.appendChild(tm);
+    r.appendChild(head);
+    if (x.msg) r.appendChild(el('div', 'pf-err', x.msg));
+    var lk = el('div', 'fb-link'); lk.appendChild(icon('link'));
+    var ls = el('span', null, x.url || '（没有识别到链接）'); ls.title = x.url || ''; lk.appendChild(ls);
+    if (x.url) {
+      var cp = el('button', 'copy'); cp.type = 'button'; cp.title = '复制链接'; cp.setAttribute('aria-label', '复制失败的链接'); cp.appendChild(icon('copy'));
+      cp.addEventListener('click', function () { copyText(x.url, '已复制链接'); });
+      lk.appendChild(cp);
+    }
+    r.appendChild(lk);
+    return r;
+  }
+  function renderPfNav(j) {
+    if (state.view !== 'pf') return;
+    var nav = $('siteNav'); nav.textContent = '';
+    nav.appendChild(el('div', 'nav-label', '平台 · 近 30 天失败'));
+    var total = (j.sites || []).reduce(function (a, x) { return a + x.n30; }, 0);
+    [{ site: '', label: '全部平台', n30: total }].concat(j.sites || []).forEach(function (s) {
+      var b = el('button', 'nav-item ' + (s.site ? 's-' + siteKey(s.site) : 's-all')); b.type = 'button';
+      b.setAttribute('data-site', s.site);
+      b.setAttribute('aria-current', state.pfSite === s.site ? 'true' : 'false');
+      b.appendChild(el('span', 'dot'));
+      b.appendChild(el('span', 'name', s.label || SITES[s.site] || s.site));
+      b.appendChild(el('span', 'count', s.n30));
+      b.addEventListener('click', function () { setPfSite(s.site); });
+      nav.appendChild(b);
+    });
+  }
+  seg('segView', function (v) { setView(v === 'pf' ? 'pf' : 'fb'); });
+  seg('segPfRange', function (v) { state.pfRange = v === '7' ? 7 : 30; loadPf(); });
+
+  function reloadAll() { renderKpisLoading(); loadStats(); loadPage(true); if (state.view === 'pf') loadPf(); }
   var qTimer;
   $('fQ').addEventListener('input', function () { clearTimeout(qTimer); qTimer = setTimeout(function () { loadPage(true); }, 350); });
   $('fQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') { clearTimeout(qTimer); loadPage(true); } });
@@ -632,7 +793,7 @@
   paintThemeButtons();
 
   api('/api/me').then(function (j) {
-    if (j.ok && j.admin) { showApp(); reloadAll(); }
+    if (j.ok && j.admin) { showApp(); reloadAll(); if (location.hash === '#failures') setView('pf'); }
     else showLogin(j.ok && j.configured === false ? '本站还没配置管理密码' : '');
   });
 })();

@@ -295,6 +295,31 @@ svg.ico{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-wi
   .fb-actions{width:100%;justify-content:flex-end}
   .chart{min-height:160px}
 }
+/* ========== 解析失败视图 ========== */
+.view-tabs{margin:-8px 0 16px}
+.seg.sm button{height:24px;padding:0 8px;font-size:12px}
+.panels.even{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+#pfKpis .kpi:nth-child(2) .kpi-val{color:inherit}
+#pfKpis .kpi:first-child .kpi-val{color:var(--danger)}
+#pfKpis .kpi:last-child .kpi-val{font-size:24px;line-height:1.25;margin-top:6px}
+.dist-row.dim{opacity:.45}
+.reasons .dist-row{grid-template-columns:112px 1fr 36px;cursor:default}
+.reasons .dist-bar i{background:var(--text-2)}
+.pf-msgs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.pf-msgs li{display:flex;gap:12px;align-items:baseline;font-size:13px;color:var(--text-2);min-width:0}
+.pf-msgs li.empty{display:block}
+.pf-msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pf-msgs b{font-variant-numeric:tabular-nums;color:var(--text)}
+.pf-samples{margin-top:16px}
+.pf-list{display:flex;flex-direction:column}
+.pf-list .state{border:0;padding:32px 12px}
+.pf-row{display:flex;flex-direction:column;gap:8px;padding:14px 0;border-top:1px solid var(--line)}
+.pf-row:first-child{border-top:0;padding-top:4px}
+.pf-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pf-code{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pf-err{font-size:13.5px;line-height:1.6;color:var(--text);word-break:break-word}
+@media (max-width:1100px){ .panels.even{grid-template-columns:1fr} }
+@media (max-width:520px){ .pf-row .fb-time{margin-left:0;width:100%} .reasons .dist-row{grid-template-columns:96px 1fr 32px} }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 /* 站点颜色 */
 .s-douyin{--c:var(--c-douyin)} .s-xiaohongshu{--c:var(--c-xiaohongshu)} .s-bilibili{--c:var(--c-bilibili)} .s-youtube{--c:var(--c-youtube)}

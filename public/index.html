@@ -55,6 +55,14 @@
       </div>
     </header>
 
+    <div class="view-tabs">
+      <div class="seg" id="segView" role="tablist" aria-label="切换视图">
+        <button type="button" role="tab" data-v="fb" aria-selected="true" aria-checked="true">用户反馈</button>
+        <button type="button" role="tab" data-v="pf" aria-selected="false" aria-checked="false">解析失败</button>
+      </div>
+    </div>
+
+    <div id="fbView">
     <section class="kpis" id="kpis" aria-label="概览"></section>
 
     <section class="panels">
@@ -92,6 +100,42 @@
     <main id="list" class="list" aria-live="polite"></main>
     <div class="more"><button type="button" class="btn ghost" id="moreBtn" hidden>加载更多</button></div>
     <p class="muted small center" id="listNote"></p>
+    </div>
+
+    <!-- 解析失败（只读）：各解析站解析失败时自动记录，按站点 + 北京日期汇总 -->
+    <div id="pfView" hidden>
+      <section class="kpis" id="pfKpis" aria-label="解析失败概览"></section>
+      <section class="panels">
+        <div class="panel chart-panel">
+          <div class="panel-head"><h2>最近 30 天解析失败</h2><span class="muted small" id="pfChartLegend"></span></div>
+          <div class="chart" id="pfChart" role="img" aria-label="最近 30 天每天解析失败次数"></div>
+        </div>
+        <div class="panel dist-panel">
+          <div class="panel-head"><h2>各平台失败次数</h2>
+            <div class="seg sm" id="segPfRange" role="radiogroup" aria-label="时间范围">
+              <button type="button" role="radio" data-v="7" aria-checked="false">7 天</button>
+              <button type="button" role="radio" data-v="30" aria-checked="true">30 天</button>
+            </div>
+          </div>
+          <div class="dist" id="pfDist"></div>
+        </div>
+      </section>
+      <section class="panels even">
+        <div class="panel">
+          <div class="panel-head"><h2>主要原因</h2><span class="muted small" id="pfReasonNote"></span></div>
+          <div class="dist reasons" id="pfReasons"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>常见报错</h2></div>
+          <ol class="pf-msgs" id="pfMsgs"></ol>
+        </div>
+      </section>
+      <div class="panel pf-samples">
+        <div class="panel-head"><h2>最新失败记录</h2><span class="muted small" id="pfSampleNote"></span></div>
+        <div id="pfSamples" class="pf-list" aria-live="polite"></div>
+      </div>
+      <p class="muted small note" id="pfNote">每个平台每天一条汇总，保留 35 天；同一时间段的大量失败会合并写入，样本只留每天最新 30 条。链接里的令牌类参数已去掉。</p>
+    </div>
   </div>
 </div>
 
