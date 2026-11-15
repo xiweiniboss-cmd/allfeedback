@@ -5,53 +5,106 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
 <title>统一反馈后台</title>
+<script src="/theme.js"></script>
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
+<!-- 登录 -->
 <div id="login" class="login" hidden>
-  <form id="loginForm" class="login-card" autocomplete="on">
+  <div class="login-bg" aria-hidden="true"></div>
+  <form id="loginForm" class="login-card" autocomplete="on" novalidate>
+    <div class="brand-mark big" aria-hidden="true"></div>
     <h1>统一反馈后台</h1>
-    <p class="muted">汇总各解析站、DeepSeek 站和智驾模拟器的反馈</p>
-    <input type="password" id="loginKey" autocomplete="current-password" placeholder="管理密码" required>
-    <button type="submit" class="btn primary" id="loginBtn">登录</button>
-    <div class="err" id="loginErr" role="alert"></div>
+    <p class="muted">汇总各解析站、DeepSeek 与智驾模拟器的用户反馈</p>
+    <label class="field">
+      <span>管理密码</span>
+      <input type="password" id="loginKey" autocomplete="current-password" placeholder="请输入管理密码" required>
+    </label>
+    <button type="submit" class="btn primary block" id="loginBtn"><span class="btn-label">登录</span></button>
+    <div class="form-err" id="loginErr" role="alert"></div>
+    <p class="login-foot muted">仅限管理员访问 · 登录状态保持 12 小时</p>
   </form>
 </div>
 
-<div id="app" hidden>
-  <header class="top">
-    <h1>反馈总览</h1>
-    <div class="top-actions">
-      <button type="button" class="btn ghost" id="refreshBtn">刷新</button>
-      <button type="button" class="btn ghost" id="logoutBtn">退出登录</button>
+<!-- 主界面 -->
+<div id="app" class="shell" hidden>
+  <aside class="sidebar" aria-label="站点导航">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div class="brand-text"><b>反馈中心</b><span>All Feedback</span></div>
     </div>
-  </header>
+    <nav class="site-nav" id="siteNav"></nav>
+    <div class="side-foot">
+      <button type="button" class="side-btn" id="themeBtn"></button>
+      <button type="button" class="side-btn" id="logoutBtn"></button>
+    </div>
+  </aside>
 
-  <section class="stats" id="stats" aria-label="统计">
-    <div class="stat-cards" id="statCards"></div>
-    <details class="days">
-      <summary>按天统计（最近 30 天）</summary>
-      <div class="table-wrap"><table id="dayTable"></table></div>
-    </details>
-    <p class="muted small" id="statNote"></p>
-  </section>
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1 id="pageTitle">全部反馈</h1>
+        <p class="muted" id="pageSub">所有站点的用户反馈</p>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" class="icon-btn mobile-only" id="themeBtnM" aria-label="切换深色模式"></button>
+        <button type="button" class="icon-btn" id="refreshBtn" aria-label="刷新" title="刷新"></button>
+        <button type="button" class="icon-btn mobile-only" id="logoutBtnM" aria-label="退出登录" title="退出登录"></button>
+      </div>
+    </header>
 
-  <section class="filters" aria-label="筛选">
-    <select id="fSite" aria-label="站点"><option value="">全部站点</option></select>
-    <select id="fKind" aria-label="问题类型"><option value="">全部类型</option></select>
-    <select id="fStatus" aria-label="处理状态">
-      <option value="">全部状态</option><option value="open">未处理</option><option value="done">已处理</option>
-    </select>
-    <select id="fOrder" aria-label="排序"><option value="desc">最新在前</option><option value="asc">最早在前</option></select>
-    <input type="search" id="fQ" placeholder="搜索内容 / 联系方式 / 链接 / IP" maxlength="100">
-    <button type="button" class="btn primary" id="searchBtn">筛选</button>
-  </section>
+    <section class="kpis" id="kpis" aria-label="概览"></section>
 
-  <div class="err" id="listErr" role="alert"></div>
-  <main id="list" class="list" aria-live="polite"></main>
-  <div class="more"><button type="button" class="btn ghost" id="moreBtn" hidden>加载更多</button></div>
-  <p class="muted small center" id="listNote"></p>
+    <section class="panels">
+      <div class="panel chart-panel">
+        <div class="panel-head"><h2>最近 30 天</h2><span class="muted small" id="chartLegend"></span></div>
+        <div class="chart" id="chart" role="img" aria-label="最近 30 天每天反馈数量"></div>
+      </div>
+      <div class="panel dist-panel">
+        <div class="panel-head"><h2>各站分布</h2></div>
+        <div class="dist" id="dist"></div>
+      </div>
+    </section>
+    <p class="muted small note" id="statNote"></p>
+
+    <div class="toolbar" id="toolbar">
+      <div class="search">
+        <span class="search-ico" aria-hidden="true"></span>
+        <input type="search" id="fQ" placeholder="搜索内容、联系方式、链接、IP、编号" maxlength="100" aria-label="搜索">
+      </div>
+      <div class="tool-row">
+      <div class="seg" id="segStatus" role="radiogroup" aria-label="处理状态">
+        <button type="button" role="radio" data-v="" aria-checked="true">全部</button>
+        <button type="button" role="radio" data-v="open" aria-checked="false">未处理</button>
+        <button type="button" role="radio" data-v="done" aria-checked="false">已处理</button>
+      </div>
+      <select id="fKind" class="select" aria-label="问题类型"><option value="">全部类型</option></select>
+      <div class="seg" id="segOrder" role="radiogroup" aria-label="排序">
+        <button type="button" role="radio" data-v="desc" aria-checked="true">最新</button>
+        <button type="button" role="radio" data-v="asc" aria-checked="false">最早</button>
+      </div>
+      </div>
+    </div>
+
+    <div id="listState"></div>
+    <main id="list" class="list" aria-live="polite"></main>
+    <div class="more"><button type="button" class="btn ghost" id="moreBtn" hidden>加载更多</button></div>
+    <p class="muted small center" id="listNote"></p>
+  </div>
+</div>
+
+<!-- 确认弹窗 -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h3 id="modalTitle"></h3>
+    <p id="modalText" class="muted"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="modalCancel">取消</button>
+      <button type="button" class="btn danger-fill" id="modalOk">确定</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast" class="toast" role="status" hidden></div>

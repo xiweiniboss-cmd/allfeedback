@@ -10,7 +10,7 @@
 
 | 路径 | 说明 |
 | --- | --- |
-| `public/` | 静态页面（index.html / app.js / app.css / _headers），无内联脚本 |
+| `public/` | 静态页面（index.html / app.js / app.css / theme.js / _headers），无内联脚本和内联样式，图表用原生 SVG 绘制，不依赖外部库 |
 | `functions/api/[[route]].js` | 所有 `/api/*` 接口入口 |
 | `functions/_middleware.js` | 给所有响应加安全头 |
 | `lib/app.js` | 后端逻辑（不在 `public/` 里，不会被当静态文件公开） |
