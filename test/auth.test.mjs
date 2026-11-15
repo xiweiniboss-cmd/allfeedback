@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeEnv, call, login, ADMIN_KEY, ORIGIN } from './helpers.mjs';
+import { handleApi } from '../lib/app.js';
 
 test('未登录：/api/me 返回 admin=false，其余接口 401', async () => {
   const { env } = makeEnv();
@@ -51,7 +52,7 @@ test('伪造 / 过期 / 其他密钥签名的 Cookie 无效；URL 上的 ?key= �
   assert.equal((await call(env, '/api/feedback', { cookie: expired })).status, 401);
 });
 
-test('密码错误 10 次后按 IP（IPv6 按 /64）锁定，计数键带本站域名', async () => {
+test('密码错误 10 次后按 IP（IPv6 按 /64）锁定，所有域名共用一个计数', async () => {
   const { env } = makeEnv();
   for (let i = 0; i < 10; i++) {
     const r = await call(env, '/api/login', { method: 'POST', body: { key: 'wrong' }, ip: '2001:db8:1:2::' + (i + 1) });
@@ -60,7 +61,11 @@ test('密码错误 10 次后按 IP（IPv6 按 /64）锁定，计数键带本站�
   const locked = await call(env, '/api/login', { method: 'POST', body: { key: ADMIN_KEY }, ip: '2001:db8:1:2:ffff::9' });
   assert.equal(locked.status, 429);
   const k = [...env.FEEDBACK_KV.m.keys()].find((x) => x.startsWith('admfail_'));
-  assert.equal(k, 'admfail_allfeedback.pages.dev_2001:db8:1:2::/64');
+  assert.equal(k, 'admfail_allfeedback_2001:db8:1:2::/64');
+  // 换一个预览域名也一样被锁
+  const env2 = env;
+  const req = new Request('https://abc123.allfeedback.pages.dev/api/login', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://abc123.allfeedback.pages.dev', 'cf-connecting-ip': '2001:db8:1:2::77' }, body: JSON.stringify({ key: ADMIN_KEY }) });
+  assert.equal((await handleApi(req, env2)).status, 429);
   const put = env.FEEDBACK_KV.log.find((x) => x[0] === 'put' && x[1] === k);
   assert.equal(put[2].expirationTtl, 900);
   // 其他网段不受影响

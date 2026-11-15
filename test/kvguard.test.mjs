@@ -5,11 +5,12 @@ import { makeEnv, call, login, memKV } from './helpers.mjs';
 
 test('guardKV：只允许反馈前缀', async () => {
   const raw = memKV({ fb_1: '{}', sess_a: 'S', conv_b: 'C', fbstatus_v1: '{}' });
-  const kv = guardKV(raw, 'h.example');
+  const kv = guardKV(raw);
   assert.equal(await kv.get('fb_1'), '{}');
   await assert.rejects(kv.get('sess_a'), KeyNotAllowed);
   await assert.rejects(kv.get('conv_b'), KeyNotAllowed);
   await assert.rejects(kv.get('admfail_other.host_1.2.3.4'), KeyNotAllowed);
+  assert.equal(await kv.get('admfail_allfeedback_1.2.3.4'), null);
   await assert.rejects(kv.delete('sess_a'), KeyNotAllowed);
   await assert.rejects(kv.delete('fbstatus_v1'), KeyNotAllowed);
   await assert.rejects(kv.put('fb_1', 'x'), KeyNotAllowed, '不允许改写原始反馈');
@@ -24,7 +25,7 @@ test('guardKV：只允许反馈前缀', async () => {
 
 test('guardKV：底层 list 返回了别的键也会被过滤', async () => {
   const evil = { async list() { return { keys: [{ name: 'fb_ok' }, { name: 'sess_leak' }], list_complete: true }; } };
-  const r = await guardKV(evil, 'h').list({ prefix: 'fb_' });
+  const r = await guardKV(evil).list({ prefix: 'fb_' });
   assert.deepEqual(r.keys.map((k) => k.name), ['fb_ok']);
 });
 
@@ -44,7 +45,7 @@ test('整个 API 流程不会碰到非反馈键，响应里也不会出现', asy
   for (const b of bodies) {
     assert.ok(!b.includes('SECRET-SESSION') && !b.includes('private chat') && !b.includes('sess_') && !b.includes('conv_'), b.slice(0, 200));
   }
-  const touched = env.FEEDBACK_KV.log.filter(([op, k]) => op !== 'list' && !(k.startsWith('fb_') || k.startsWith('feedback_fb_') || k === 'fbstatus_v1' || k.startsWith('admfail_allfeedback.pages.dev_')));
+  const touched = env.FEEDBACK_KV.log.filter(([op, k]) => op !== 'list' && !(k.startsWith('fb_') || k.startsWith('feedback_fb_') || k === 'fbstatus_v1' || k.startsWith('admfail_allfeedback_')));
   assert.deepEqual(touched, []);
   const lists = new Set(env.FEEDBACK_KV.log.filter((x) => x[0] === 'list').map((x) => x[1]));
   assert.deepEqual([...lists].sort(), ['fb_', 'feedback_fb_']);

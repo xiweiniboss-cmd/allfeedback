@@ -20,7 +20,7 @@
 
 | 接口 | 说明 |
 | --- | --- |
-| `POST /api/login` | JSON `{key}`，同源，成功后下发 12 小时 HttpOnly Cookie；同一 IP（IPv6 按 /64）错 10 次锁 15 分钟 |
+| `POST /api/login` | JSON `{key}`，同源，成功后下发 12 小时 HttpOnly Cookie；同一 IP（IPv6 按 /64）错 10 次锁 15 分钟（正式域名和所有预览域名共用计数） |
 | `POST /api/logout` | 清除 Cookie |
 | `GET /api/me` | 是否已登录 |
 | `GET /api/feedback` | 列表：`site` `kind` `status`(open/done) `q` `order`(desc/asc) `limit`(≤50) `cursor` |
@@ -34,7 +34,7 @@
 `FEEDBACK_KV` 同时存着 DeepSeek 站的账号、会话、聊天记录。本站所有 KV 访问都经过 `guardKV()`：
 
 - 只能 `list` 前缀 `fb_` 和 `feedback_fb_`（旧版快手）；
-- 只能读 / 删反馈键；只能写本站自己的 `fbstatus_v1`（处理状态）和 `admfail_<本站域名>_…`（登录失败计数）；
+- 只能读 / 删反馈键；只能写本站自己的 `fbstatus_v1`（处理状态）和 `admfail_allfeedback_…`（登录失败计数，所有预览域名共用一个计数）；
 - 其他任何键直接拒绝，底层 list 返回的非反馈键也会被过滤。
 
 R2 只允许 `fb/` 前缀；附件响应带 `nosniff` 和 `Content-Security-Policy: default-src 'none'; sandbox`，不在白名单内的类型（SVG、HTML 等）一律按下载处理。
