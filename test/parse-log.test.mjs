@@ -36,9 +36,12 @@ test('成功 / 失败 / 4xx 都记一行：站点、去令牌链接、IP、归�
   await pl.wrap(req('https://v.douyin.com/b/'), env, ctx, async () => jsonResp({ ok: false, error: '上游返回 HTTP 500' }, 502));
   await pl.wrap(req('https://v.douyin.com/c/', { dev: 'not-a-uuid' }), env, ctx, async () => jsonResp({ code: -1, msg: '视频已删除' }));
   await pl.wrap(req('https://example.com/x'), env, ctx, async () => jsonResp({ ok: false, error: '只支持抖音链接' }, 400));
+  await pl.wrap(req('https://weibo.com/1/a'), env, ctx, async () => jsonResp({ code: 200, msg: 'ok', data: {} }));
+  await pl.wrap(req('https://weibo.com/1/b'), env, ctx, async () => jsonResp({ code: 400, msg: '没有找到图片或视频' }));
   await drain();
   const rs = rows(d1);
-  assert.equal(rs.length, 4);
+  assert.equal(rs.length, 6);
+  assert.deepEqual([rs[4].ok, rs[5].ok, rs[5].reason], [1, 0, '没有找到图片或视频'], '微博：code 200 成功、HTTP 200 + code 400 失败');
   assert.deepEqual([rs[0].site, rs[0].url, rs[0].ok, rs[0].status, rs[0].ip, rs[0].country, rs[0].region, rs[0].city, rs[0].device_id, rs[0].ua],
     ['douyin', 'https://v.douyin.com/a/', 1, 200, '203.0.113.5', 'CN', '广东', '深圳', DEV, 'UA-test']);
   assert.deepEqual([rs[1].ok, rs[1].status, rs[1].reason], [0, 502, '上游返回 HTTP 500']);

@@ -164,7 +164,8 @@ function createParseLog(site, opts) {
         const job = (async () => {
           let body = null;
           if (clone) { try { body = await clone.json(); } catch {} }
-          const failed = status >= 300 || !!(body && (body.ok === false || (typeof body.code === 'number' && body.code !== 0)));
+          // 失败：非 2xx，或 ok:false，或 code 不是 0 / 200（TikTok 成功 code=0，微博成功 code=200）
+          const failed = status >= 300 || !!(body && (body.ok === false || (typeof body.code === 'number' && body.code !== 0 && body.code !== 200)));
           const msg = failed ? String((body && (body.error || body.msg || body.message)) || ('HTTP ' + status)).replace(/\s+/g, ' ').trim().slice(0, 160) : '';
           await write(env, ctx, { ...row, ok: !failed, status, reason: msg });
         })().catch(() => {});
