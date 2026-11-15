@@ -848,7 +848,19 @@
   function shortDev(d) { return d ? d.slice(0, 8) + '…' + d.slice(-4) : ''; }
   var BL_NAMES = { ip: ' IP', device: '设备', fp: '设备指纹' };
   async function doBlock(type, value, note, label) {
-    if (!(await confirmBox('拉黑这个' + (BL_NAMES[type] || '') + '？', label + ' 将无法在任何解析站解析（返回「访问受限」），最多 1 分钟后生效，可以在「黑名单」里解除。', '拉黑'))) return false;
+    var title = '拉黑这个' + (BL_NAMES[type] || '') + '？';
+    var text = label + ' 将无法在任何解析站解析和下载（返回「访问受限」），最多 1 分钟后生效，可以在「黑名单」里解除。';
+    if (type === 'fp') {
+      // 指纹撞车很常见：先查这个指纹最近 30 天出现在多少个不同 IP / 设备上，明确提示可能误伤
+      var st = await api('/api/fp-stats?fp=' + encodeURIComponent(value));
+      if (st.status === 401) return false;
+      title = '拉黑这个设备指纹？可能误伤其他人';
+      text = '同型号手机、同版本浏览器常常算出一模一样的指纹，拉黑指纹可能把用同款设备的其他用户一起拦掉。' +
+        (st.ok ? '这个指纹最近 30 天出现在 ' + st.ips + ' 个不同 IP、' + st.devices + ' 个设备 ID 上（共 ' + st.n + ' 次解析）。' : '（没能查到这个指纹的使用情况：' + (st.error || '') + '）') +
+        (st.ok && st.ips > 1 ? '超过 1 个 IP，很可能不止一个人在用，建议改为拉黑 IP 或设备 ID。' : '') +
+        '确定拉黑的话，' + text;
+    }
+    if (!(await confirmBox(title, text, type === 'fp' ? '仍然拉黑指纹' : '拉黑'))) return false;
     var j = await api('/api/block', { method: 'POST', body: { type: type, value: value, note: note } });
     if (!j.ok) { if (j.status !== 401) toast('拉黑失败：' + (j.error || '')); return false; }
     toast('已拉黑 ' + j.value);

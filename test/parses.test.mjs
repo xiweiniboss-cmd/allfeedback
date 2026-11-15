@@ -108,3 +108,39 @@ test('没绑定 D1：提示未绑定，其他功能不受影响；整个流程�
   await call(env2, '/api/block', { method: 'POST', body: { type: 'ip', value: '1.2.3.4' }, cookie: c2 });
   assert.deepEqual(env2.FEEDBACK_KV.log, [], '解析记录 / 拉黑只用 D1，不读写 KV');
 });
+
+test('/api/parses：按站点 / IP / 日期 / 翻页查询都不整段重排（EXPLAIN 里没有 TEMP B-TREE），日期先换成 id 区间', async () => {
+  const { env, cookie } = await setup();
+  const d1 = env.PARSE_DB;
+  const ins = d1.db.prepare('INSERT INTO parse_log (ts, site, ip) VALUES (?, ?, ?)');
+  const base = Date.parse('2026-11-01T00:00:00+08:00');
+  for (let i = 0; i < 300; i++) ins.run(base + i * 3600000, ['douyin', 'weibo', 'tiktok'][i % 3], '10.0.0.' + (i % 7));
+  for (const q of ['', '?site=weibo', '?ip=10.0.0.3', '?from=2026-11-05&to=2026-11-06', '?site=tiktok&from=2026-11-03', '?result=fail', '?before=200', '?device=' + DEV, '?fp=' + FP]) {
+    d1.log.length = 0;
+    const j = await (await call(env, '/api/parses' + q, { cookie })).json();
+    assert.equal(j.ok, true, q);
+    const main = d1.log.find((s) => s.startsWith('SELECT id, ts, site'));
+    const plan = d1.db.prepare('EXPLAIN QUERY PLAN ' + main).all(...Array((main.match(/\?/g) || []).length).fill(1)).map((x) => x.detail).join(' | ');
+    assert.ok(!/TEMP B-TREE/.test(plan), q + ' → ' + plan);
+  }
+  const j = await (await call(env, '/api/parses?from=2026-11-05&to=2026-11-05&limit=100', { cookie })).json();
+  assert.equal(j.items.length, 24);
+  assert.ok(j.items.every((x) => x.ts >= Date.parse('2026-11-05T00:00:00+08:00') && x.ts < Date.parse('2026-11-06T00:00:00+08:00')));
+  const e = await (await call(env, '/api/parses?from=2030-01-01', { cookie })).json();
+  assert.equal(e.items.length, 0, '起始日期之后没数据 → 空');
+});
+
+test('/api/fp-stats：拉黑指纹前给出最近 30 天的不同 IP / 设备数；要登录、格式校验', async () => {
+  const { env, cookie } = await setup();
+  const ins = env.PARSE_DB.db.prepare('INSERT INTO parse_log (ts, site, ip, device_id, fp) VALUES (?, ?, ?, ?, ?)');
+  const t = Date.now();
+  ins.run(t - 1000, 'douyin', '198.51.100.1', DEV, FP);
+  ins.run(t - 2000, 'douyin', '198.51.100.2', '', FP);
+  ins.run(t - 3000, 'weibo', '198.51.100.2', '', FP);
+  ins.run(t - 40 * 86400000, 'weibo', '198.51.100.9', '', FP); // 30 天前不算
+  ins.run(t - 1000, 'weibo', '198.51.100.3', '', 'f'.repeat(32));
+  const j = await (await call(env, '/api/fp-stats?fp=' + FP.toUpperCase(), { cookie })).json();
+  assert.deepEqual([j.ok, j.fp, j.n, j.ips, j.devices], [true, FP, 4, 3, 2], '含 seed 里那一行（203.0.113.5）');
+  assert.equal((await call(env, '/api/fp-stats?fp=xyz', { cookie })).status, 400);
+  assert.equal((await call(env, '/api/fp-stats?fp=' + FP)).status, 401);
+});
