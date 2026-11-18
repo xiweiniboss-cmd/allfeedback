@@ -33,6 +33,8 @@
     today: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
     trend: 'M23 6l-9.5 9.5-5-5L1 18M17 6h6v6',
     download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
+    play: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM10 8l6 4-6 4z',
+    image: 'M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM21 15l-5-5L5 21',
     broken: 'M2 2l20 20M10.41 10.41a2 2 0 1 1-2.83-2.83M21 15l-3.09-3.09M13.5 13.5L6 21M3 3a2 2 0 0 0-1 1.73V19a2 2 0 0 0 2 2h14.27M21 16V5a2 2 0 0 0-2-2H8',
   };
   function icon(name) {
@@ -872,8 +874,48 @@
     toast('已解除 ' + value);
     return true;
   }
+  var MEDIA_LABEL = { video: '视频', image: '图片', images: '图集', mix: '图文', audio: '音频', live: '实况' };
+  function safeHttp(u) { return /^https?:\/\//i.test(String(u || '')) ? String(u) : ''; }
+  // 预览卡片：左侧封面（没有 / 加载失败显示占位并注明类型），点封面或标题新标签打开原链接
+  function plThumbPh(x, text) {
+    var ph = el('span', 'pl-ph');
+    ph.appendChild(icon(x.media === 'video' || x.media === 'live' ? 'play' : x.media ? 'image' : 'file'));
+    ph.appendChild(el('span', 'pl-ph-t', text));
+    return ph;
+  }
+  function plThumb(x) {
+    var href = safeHttp(x.url);
+    var box = el(href ? 'a' : 'span', 'pl-thumb');
+    if (href) { box.href = href; box.target = '_blank'; box.rel = 'noopener noreferrer'; box.title = '新标签打开原链接'; }
+    box.setAttribute('aria-label', (x.title || '原链接') + '（新标签打开）');
+    var kind = MEDIA_LABEL[x.media] || '';
+    var cover = /^https:\/\//i.test(String(x.cover || '')) ? x.cover : '';
+    if (cover) {
+      var img = document.createElement('img');
+      img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
+      img.referrerPolicy = 'no-referrer'; img.setAttribute('referrerpolicy', 'no-referrer');
+      img.addEventListener('error', function () { img.remove(); var kb = box.querySelector('.pl-kind'); if (kb) kb.remove(); box.classList.add('empty'); box.appendChild(plThumbPh(x, kind ? kind + ' · 封面失效' : '封面失效')); }, { once: true });
+      img.src = cover;
+      box.appendChild(img);
+    } else {
+      box.classList.add('empty');
+      box.appendChild(plThumbPh(x, kind || (x.ok ? '无封面' : '解析失败')));
+    }
+    if (kind && cover) box.appendChild(el('span', 'pl-kind', kind));
+    return box;
+  }
+  function plTitleLink(x) {
+    var href = safeHttp(x.url);
+    var text = x.title || (x.ok ? '（无标题）' : '（解析失败，无标题）');
+    var t = el(href ? 'a' : 'span', 'pl-title' + (x.title ? '' : ' empty'), text);
+    if (href) { t.href = href; t.target = '_blank'; t.rel = 'noopener noreferrer'; }
+    t.title = x.title || href || '';
+    return t;
+  }
   function plRow(x) {
     var r = el('div', 'pl-row s-' + siteKey(x.site));
+    r.appendChild(plThumb(x));
+    var main = el('div', 'pl-main');
     var head = el('div', 'pf-head');
     head.appendChild(el('span', 'chip site', x.siteLabel || SITES[x.site] || x.site));
     head.appendChild(el('span', 'chip ' + (x.ok ? 'res-ok' : 'res-fail'), x.ok ? '成功' : '失败' + (x.status ? ' · ' + x.status : '')));
@@ -881,7 +923,10 @@
     var tm = el('span', 'fb-time');
     if (x.ts) { tm.appendChild(el('b', null, fmtRel(x.ts))); tm.appendChild(document.createTextNode(' · ' + fmtAbs(x.ts))); tm.title = '北京时间 ' + fmtAbs(x.ts); }
     head.appendChild(tm);
-    r.appendChild(head);
+    main.appendChild(head);
+    main.appendChild(plTitleLink(x));
+    r.appendChild(main);
+    var rest = el('div', 'pl-rest');
     var lk = el('div', 'fb-link'); lk.appendChild(icon('link'));
     var ls = el('span', null, x.url || '（没有识别到链接）'); ls.title = x.url || ''; lk.appendChild(ls);
     if (x.url) {
@@ -889,8 +934,8 @@
       cp.addEventListener('click', function () { copyText(x.url, '已复制链接'); });
       lk.appendChild(cp);
     }
-    r.appendChild(lk);
-    if (!x.ok && x.reason) r.appendChild(el('div', 'pf-err', x.reason));
+    rest.appendChild(lk);
+    if (!x.ok && x.reason) rest.appendChild(el('div', 'pf-err', x.reason));
     var foot = el('div', 'fb-foot');
     var meta = el('div', 'meta');
     var geo = [x.country, x.region, x.city].filter(Boolean).join(' · ');
@@ -931,7 +976,8 @@
     if (x.device) acts.appendChild(blockBtn('device', x.device, x.deviceBlocked, '设备', '设备 ' + x.device));
     if (x.fp) acts.appendChild(blockBtn('fp', x.fp, x.fpBlocked, '指纹', '设备指纹 ' + x.fp));
     foot.appendChild(acts);
-    r.appendChild(foot);
+    rest.appendChild(foot);
+    r.appendChild(rest);
     return r;
   }
   async function loadBl() {

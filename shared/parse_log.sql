@@ -15,7 +15,10 @@ CREATE TABLE IF NOT EXISTS parse_log (
   city TEXT NOT NULL DEFAULT '',
   device_id TEXT NOT NULL DEFAULT '',
   ua TEXT NOT NULL DEFAULT '',
-  fp TEXT NOT NULL DEFAULT ''     -- 设备指纹（32 位十六进制）
+  fp TEXT NOT NULL DEFAULT '',    -- 设备指纹（32 位十六进制）
+  cover TEXT DEFAULT '',          -- 预览封面（只存 https 链接，≤500 字；2026-11-19 加）
+  title TEXT DEFAULT '',          -- 预览标题（≤120 字）
+  media TEXT DEFAULT ''           -- 类型：video / image / images / mix / audio / live
 );
 -- 索引只留查询真正用得上的（D1 每多一个索引，每插一行、删一行都多算一次写入）：
 --   ts：按日期筛、失败统计、30 天清理；site / ip：后台按站点、IP 筛（索引自带 rowid，按 id 倒序翻页不用再排序）。
