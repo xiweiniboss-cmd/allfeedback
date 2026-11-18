@@ -333,9 +333,24 @@ svg.ico{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-wi
 .pl-list{display:flex;flex-direction:column}
 .pl-list .state{border:0;padding:32px 12px}
 .pl-list .sk-card{border:0;padding:16px 0}
-.pl-row{display:flex;flex-direction:column;gap:8px;padding:16px 0;border-top:1px solid var(--line)}
+/* 预览卡片：左封面，右标题 + 原有信息；手机上封面和标题并排，下面的链接 / 信息占满整行 */
+.pl-row{display:grid;grid-template-columns:112px minmax(0,1fr);grid-template-areas:"thumb main" "thumb rest";column-gap:16px;row-gap:8px;align-items:start;padding:16px 0;border-top:1px solid var(--line)}
 .pl-row:first-child{border-top:0}
 .pl-row .fb-foot{border-top:0;padding-top:0}
+.pl-thumb{grid-area:thumb;position:relative;display:block;width:112px;height:84px;border-radius:8px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line);text-decoration:none;color:var(--muted)}
+.pl-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+a.pl-thumb:hover{border-color:var(--line-2)}
+.pl-thumb.empty{border-style:dashed;border-color:var(--line-2)}
+.pl-ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:4px;text-align:center}
+.pl-ph svg.ico{width:20px;height:20px}
+.pl-ph-t{font-size:11px;line-height:1.3;color:var(--muted)}
+.pl-kind{position:absolute;left:4px;bottom:4px;height:20px;padding:0 6px;border-radius:4px;display:inline-flex;align-items:center;font-size:11px;background:rgba(0,0,0,.6);color:#fff}
+.pl-main{grid-area:main;display:flex;flex-direction:column;gap:4px;min-width:0}
+.pl-rest{grid-area:rest;display:flex;flex-direction:column;gap:8px;min-width:0}
+.pl-title{font-size:14px;font-weight:550;line-height:1.5;color:var(--text);text-decoration:none;word-break:break-word;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+a.pl-title:hover{color:var(--primary);text-decoration:underline;text-underline-offset:2px}
+.pl-title.empty{color:var(--muted);font-weight:400}
 .chip.res-ok{background:var(--ok-soft);color:var(--ok)}
 .chip.res-fail{background:var(--danger-soft);color:var(--danger)}
 .chip.res-block{background:var(--text);color:var(--surface)}
@@ -352,6 +367,9 @@ svg.ico{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-wi
   .pl-panel{padding:4px 16px}
   #plIp,#plDev,#plFp,.date-f .input{width:100%} .date-f{flex:1 1 45%} #plIp,#plDev,#plFp{flex:1 1 45%} .pl-toolbar .select{flex:1 1 100%}
   .pl-row .fb-time{margin-left:0;width:100%}
+  .pl-row{grid-template-columns:88px minmax(0,1fr);grid-template-areas:"thumb main" "rest rest";column-gap:12px}
+  .pl-thumb{width:88px;height:88px}
+  .pl-title{font-size:13.5px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 /* 站点颜色 */

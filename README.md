@@ -32,7 +32,7 @@
 | `DELETE /api/feedback` | JSON `{id}`，连同附件一起删除 |
 | `POST /api/status` | JSON `{id, status: "done"|"open"}` |
 | `GET /api/file?key=fb/...` | 查看附件 |
-| `GET /api/parses` | 解析记录（D1）：`site` `ip` `device` `fp` `from` `to`(北京日期) `result`(ok/fail) `before`(分页) `limit`(≤100)，最新在前 |
+| `GET /api/parses` | 解析记录（D1）：`site` `ip` `device` `fp` `from` `to`(北京日期) `result`(ok/fail) `before`(分页) `limit`(≤100)，最新在前；每条带预览 `cover`(https) `title` `media`（线上库未迁移时为空串） |
 | `GET /api/blocklist` | 黑名单 |
 | `POST /api/block` / `POST /api/unblock` | JSON `{type: "ip"|"device"|"fp", value, note}`，同源；IPv6 统一按 /64 存 |
 | `GET /api/failures` | 解析失败统计（只读）：`days`(7/30) `site`；各站近 7 / 30 天次数、每天次数、主要原因、常见报错、最新 50 条样本 |
@@ -98,3 +98,16 @@ if (url.pathname === '/api/parse') return pf.wrap(request, env, ctx, () => handl
 - **设备指纹**：前端用 canvas 渲染、屏幕尺寸/色深、时区、语言、CPU 核数、平台、UA 算 SHA-256 取前 32 位。清浏览器数据不变，换 / 升级浏览器会变；
   **同型号同浏览器的设备经常撞同一个指纹**。后台「拉黑指纹」会先查 `/api/fp-stats`：这个指纹最近 30 天出现在多少个不同 IP / 设备上，并弹出误伤警告，确认后才拉黑。
 - 不用 KV：解析记录、失败统计、黑名单都在 D1，共用 KV 的写入一次都不增加。
+
+## 解析记录预览卡片（parse-log v3，2026-11-19）
+
+- **迁移（先做）**：在线上 D1 `parse_log` 执行 `shared/migrations/2026-11-19-preview.sql`（三条 `ALTER TABLE parse_log ADD COLUMN`：`cover` / `title` / `media`，只做加法，旧记录为空串）：
+  `npx wrangler d1 execute parse_log --remote --file shared/migrations/2026-11-19-preview.sql`
+- **各站**：解析成功拿到结果后调 `plMeta(request, { cover, title, media })`，成功行一起写进三列。
+  封面只收 https（`//` 开头补 `https:`，`http:` 升成 `https:`；带账号密码、超过 500 字丢弃）；标题去控制字符 / 零宽 / 方向控制符、合并空白，≤120 字；类型只收 `video` `image` `images` `mix` `audio` `live`。
+  失败行不带预览。`plMeta` 出任何错都吞掉，不影响解析。
+- **迁移前也不丢记录**：带预览的 INSERT 报「没有这一列」时退回旧 13 列再写一次，并在本 isolate 内 10 分钟直接写旧列；超时等其他错误不重试（避免写两行）。后台 `/api/parses` 同样在缺列时按旧列查。
+- **v3 同时并入了微博站副本里原有的规则**：`code=200` 且 `msg='empty'`（没有图片 / 视频）记为失败，原因「没有解析到图片或视频」。
+- **后台卡片**：左侧缩略图（`referrerpolicy=no-referrer`、懒加载；没有封面 / 加载失败显示占位并注明类型），点封面或标题新标签打开原链接（`noopener noreferrer`）。
+  页面 CSP 只放开 `img-src https:`，`script-src` / `style-src` 不变。
+
