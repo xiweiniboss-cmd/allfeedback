@@ -312,7 +312,6 @@
     var W = Math.round(box.clientWidth), H = Math.round(box.clientHeight);
     if (!W || !H) return; // 还没显示，等 ResizeObserver
     box.textContent = '';
-    // 站点堆叠顺序：和右侧分布一致（总数多的在下面）
     var days = [];
     for (var i = 29; i >= 0; i--) {
       var d = dayCN(Date.now() - i * 86400000), rec = byDay[d] || { total: 0, sites: {} };
@@ -322,61 +321,124 @@
       days.push({ day: d, n: rec.total || 0, parts: parts, today: i === 0 });
     }
     var sum = days.reduce(function (a, b) { return a + b.n; }, 0);
-    legend.textContent = '共 ' + sum + ' ' + words.unit;
-    var ticks = niceTicks(Math.max.apply(null, days.map(function (x) { return x.n; })));
+    var avg = sum / days.length;
+    var maxVal = Math.max.apply(null, days.map(function (x) { return x.n; }));
+    legend.textContent = '共 ' + sum + ' ' + words.unit + ' · 日均 ' + avg.toFixed(1);
+    var ticks = niceTicks(maxVal);
     var top = ticks[ticks.length - 1];
-    // 边距：左边给 y 轴数字，右边留够最后一个日期标签（今天）的一半宽度，柱子和标签都不会被裁掉
-    var L = 10 + String(top).length * 7, R = 16, T = 10, B = 22;
-    var x0 = L + 6, x1 = W - R, plotH = H - T - B, baseY = H - B;
-    var slot = (x1 - x0) / days.length, bw = Math.min(28, Math.max(3, slot * 0.62));
+    var L = 12 + String(top).length * 7, R = 18, T = 16, B = 26;
+    var x0 = L + 8, x1 = W - R, plotH = H - T - B, baseY = H - B;
+    var stepX = (x1 - x0) / Math.max(1, days.length - 1);
     var yOf = function (v) { return baseY - plotH * v / top; };
     var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H });
-    var defs = svgEl('defs', {}); svg.appendChild(defs);
+
+    // 渐变填充 defs
+    var defs = svgEl('defs', {});
+    var gid = box.id + '-grad';
+    var lg = svgEl('linearGradient', { id: gid, x1: '0', y1: '0', x2: '0', y2: '1' });
+    var isPf = box.id === 'pfChart';
+    var stopColor = isPf ? 'var(--danger)' : 'var(--primary)';
+    lg.appendChild(svgEl('stop', { offset: '0%', 'stop-color': stopColor, 'stop-opacity': '0.26' }));
+    lg.appendChild(svgEl('stop', { offset: '75%', 'stop-color': stopColor, 'stop-opacity': '0.05' }));
+    lg.appendChild(svgEl('stop', { offset: '100%', 'stop-color': stopColor, 'stop-opacity': '0' }));
+    defs.appendChild(lg);
+    svg.appendChild(defs);
+
+    // 水平刻度线与 Y 轴
     ticks.forEach(function (v) {
       var y = Math.round(yOf(v)) + 0.5;
       svg.appendChild(svgEl('line', { x1: x0 - 4, x2: x1, y1: y, y2: y, class: 'grid' + (v === 0 ? ' base' : '') }));
-      var t = svgEl('text', { x: L, y: y + 3.5, 'text-anchor': 'end', class: 'axis' }); t.textContent = String(v); svg.appendChild(t);
+      var t = svgEl('text', { x: L, y: y + 3.5, 'text-anchor': 'end', class: 'axis' });
+      t.textContent = String(v);
+      svg.appendChild(t);
     });
-    // 日期标签：从今天往前每隔 k 天一个，k 按柱宽算，保证标签之间至少 44px，不重叠
-    var minGap = 44, kSteps = [1, 2, 3, 5, 7, 10, 15], k = 15;
-    for (var s2 = 0; s2 < kSteps.length; s2++) if (kSteps[s2] * slot >= minGap) { k = kSteps[s2]; break; }
-    var cols = svgEl('g', { class: 'cols' }), bars = svgEl('g', { class: 'bars' }), hits = svgEl('g', { class: 'hits' });
-    svg.appendChild(cols); svg.appendChild(bars);
-    days.forEach(function (d, i) {
-      var cx = x0 + slot * (i + 0.5), bx = cx - bw / 2;
+
+    // 均值参考虚线
+    if (avg > 0) {
+      var avgY = Math.round(yOf(avg)) + 0.5;
+      svg.appendChild(svgEl('line', { x1: x0, x2: x1, y1: avgY, y2: avgY, class: 'area-avg' }));
+      var avgLbl = svgEl('text', { x: x1, y: avgY - 5, 'text-anchor': 'end', class: 'area-avg-lbl' });
+      avgLbl.textContent = '日均 ' + avg.toFixed(1);
+      svg.appendChild(avgLbl);
+    }
+
+    // 计算平滑单调三次样条点集（不会下穿 0 轴或过冲）
+    var pts = days.map(function (d, idx) {
+      var cx = x0 + stepX * idx;
+      var cy = yOf(d.n);
       d.cx = cx;
-      cols.appendChild(svgEl('rect', { x: x0 + slot * i, y: T, width: slot, height: plotH, class: 'col', 'data-i': i }));
-      if (d.n) {
-        var hTot = baseY - yOf(d.n);
-        var cid = box.id + '-c' + i;
-        var cp = svgEl('clipPath', { id: cid });
-        cp.appendChild(svgEl('rect', { x: bx, y: baseY - hTot, width: bw, height: hTot + 4, rx: Math.min(3, bw / 2) }));
-        defs.appendChild(cp);
-        var g = svgEl('g', { 'clip-path': 'url(#' + cid + ')' });
-        var acc = 0;
-        d.parts.forEach(function (pt) {
-          var y1 = yOf(acc), y2 = yOf(acc + pt.n); acc += pt.n;
-          g.appendChild(svgEl('rect', { x: bx, y: y2, width: bw, height: Math.max(0.5, y1 - y2), class: 'seg s-' + siteKey(pt.site) }));
-        });
-        if (acc < d.n) { var yA = yOf(acc), yB = yOf(d.n); g.appendChild(svgEl('rect', { x: bx, y: yB, width: bw, height: yA - yB, class: 'seg s-other' })); }
-        d.topY = baseY - hTot;
-        bars.appendChild(g);
-      } else d.topY = baseY;
-      if ((days.length - 1 - i) % k === 0) {
-        var lt = svgEl('text', { x: cx, y: H - 6, 'text-anchor': 'middle', class: 'axis' + (d.today ? ' today' : '') });
+      d.topY = cy;
+      return { x: cx, y: cy };
+    });
+    var n = pts.length, m = [], tang = new Array(n);
+    for (var j = 0; j < n - 1; j++) m[j] = (pts[j + 1].y - pts[j].y) / (pts[j + 1].x - pts[j].x);
+    tang[0] = m[0]; tang[n - 1] = m[n - 2];
+    for (var j2 = 1; j2 < n - 1; j2++) {
+      if (m[j2 - 1] * m[j2] <= 0) tang[j2] = 0;
+      else {
+        var avgM = (m[j2 - 1] + m[j2]) / 2;
+        var lim = 3 * Math.min(Math.abs(m[j2 - 1]), Math.abs(m[j2]));
+        tang[j2] = Math.abs(avgM) > lim ? (avgM > 0 ? lim : -lim) : avgM;
+      }
+    }
+    var lineD = 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
+    for (var j3 = 0; j3 < n - 1; j3++) {
+      var dx = pts[j3 + 1].x - pts[j3].x;
+      var c1x = pts[j3].x + dx / 3, c1y = Math.min(baseY, Math.max(T, pts[j3].y + tang[j3] * dx / 3));
+      var c2x = pts[j3 + 1].x - dx / 3, c2y = Math.min(baseY, Math.max(T, pts[j3 + 1].y - tang[j3 + 1] * dx / 3));
+      lineD += ' C' + c1x.toFixed(1) + ',' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ',' + c2y.toFixed(1) + ' ' + pts[j3 + 1].x.toFixed(1) + ',' + pts[j3 + 1].y.toFixed(1);
+    }
+    var areaD = 'M' + pts[0].x.toFixed(1) + ',' + baseY.toFixed(1) + ' L' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1) + lineD.slice(lineD.indexOf(' ')) + ' L' + pts[n - 1].x.toFixed(1) + ',' + baseY.toFixed(1) + ' Z';
+
+    svg.appendChild(svgEl('path', { d: areaD, fill: 'url(#' + gid + ')' }));
+    svg.appendChild(svgEl('path', { d: lineD, class: 'area-line' }));
+
+    // 关键节点圆点（峰值 + 今日）
+    var dotsG = svgEl('g', { class: 'dots' });
+    days.forEach(function (d, idx) {
+      if ((maxVal > 0 && d.n === maxVal) || d.today) {
+        dotsG.appendChild(svgEl('circle', {
+          cx: d.cx.toFixed(1), cy: d.topY.toFixed(1),
+          r: d.today ? '4' : '3.5',
+          class: 'area-dot' + (d.n === maxVal && maxVal > 0 ? ' peak' : '')
+        }));
+      }
+    });
+    svg.appendChild(dotsG);
+
+    // X 轴日期标签
+    var minGap = 48, kSteps = [1, 2, 3, 5, 7, 10, 15], k = 15;
+    for (var s2 = 0; s2 < kSteps.length; s2++) if (kSteps[s2] * stepX >= minGap) { k = kSteps[s2]; break; }
+    days.forEach(function (d, idx) {
+      if ((days.length - 1 - idx) % k === 0) {
+        var lt = svgEl('text', { x: d.cx, y: H - 6, 'text-anchor': 'middle', class: 'axis' + (d.today ? ' today' : '') });
         lt.textContent = d.today ? '今天' : d.day.slice(5).replace('-', '/');
         svg.appendChild(lt);
       }
-      // 透明的鼠标感应区放在最上层，柱子不会挡住它
-      hits.appendChild(svgEl('rect', { x: x0 + slot * i, y: 0, width: slot, height: H, class: 'hit', 'data-i': i }));
+    });
+
+    // 悬浮准星线与聚焦圆环
+    var guide = svgEl('line', { x1: 0, x2: 0, y1: T, y2: baseY, class: 'area-guide' });
+    var halo = svgEl('circle', { cx: 0, cy: 0, r: 9, class: 'area-focus-halo' });
+    var focusDot = svgEl('circle', { cx: 0, cy: 0, r: 4.5, class: 'area-focus' });
+    svg.appendChild(guide); svg.appendChild(halo); svg.appendChild(focusDot);
+
+    // 鼠标感应区
+    var hits = svgEl('g', { class: 'hits' });
+    days.forEach(function (d, idx) {
+      var hx = idx === 0 ? x0 - stepX / 2 : d.cx - stepX / 2;
+      hits.appendChild(svgEl('rect', { x: hx, y: 0, width: stepX, height: H, class: 'hit', 'data-i': idx }));
     });
     svg.appendChild(hits);
+
     var tip = el('div', 'chart-tip'); tip.hidden = true;
     var cur = -1;
-    function show(i) {
-      if (i === cur) return; cur = i;
-      var d = days[i];
-      var colEls = cols.children; for (var c = 0; c < colEls.length; c++) colEls[c].classList.toggle('on', c === i);
+    function show(idx) {
+      if (idx === cur) return; cur = idx;
+      var d = days[idx];
+      guide.setAttribute('x1', d.cx.toFixed(1)); guide.setAttribute('x2', d.cx.toFixed(1)); guide.classList.add('on');
+      halo.setAttribute('cx', d.cx.toFixed(1)); halo.setAttribute('cy', d.topY.toFixed(1)); halo.classList.add('on');
+      focusDot.setAttribute('cx', d.cx.toFixed(1)); focusDot.setAttribute('cy', d.topY.toFixed(1)); focusDot.classList.add('on');
       tip.textContent = '';
       var dt = new Date(d.day + 'T00:00:00Z');
       tip.appendChild(el('div', 'tip-date', (d.today ? '今天 · ' : '') + d.day.slice(5).replace('-', '月') + '日 周' + WEEK[dt.getUTCDay()]));
@@ -389,14 +451,16 @@
         tip.appendChild(row);
       });
       tip.hidden = false;
-      // 先放进去量尺寸，再左右夹在图表范围内；放在柱子顶部上方，太靠上时贴着图表顶部
       var tw = tip.offsetWidth, th = tip.offsetHeight;
       var left = Math.min(Math.max(d.cx - tw / 2, 0), W - tw);
-      var topPx = Math.max(d.topY - th - 8, -th / 2);
+      var topPx = Math.max(d.topY - th - 12, 0);
       tip.style.left = Math.round(left) + 'px';
       tip.style.top = Math.round(topPx) + 'px';
     }
-    function hide() { cur = -1; tip.hidden = true; var colEls = cols.children; for (var c = 0; c < colEls.length; c++) colEls[c].classList.remove('on'); }
+    function hide() {
+      cur = -1; tip.hidden = true;
+      guide.classList.remove('on'); halo.classList.remove('on'); focusDot.classList.remove('on');
+    }
     hits.addEventListener('pointerover', function (e) { var i = e.target.getAttribute && e.target.getAttribute('data-i'); if (i !== null) show(Number(i)); });
     hits.addEventListener('pointerdown', function (e) { var i = e.target.getAttribute && e.target.getAttribute('data-i'); if (i !== null) show(Number(i)); });
     svg.addEventListener('pointerleave', function (e) { if (e.pointerType === 'mouse') hide(); });
