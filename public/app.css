@@ -2471,3 +2471,12 @@ a.pl-title:hover {
 .s-brake { --c: var(--c-brake); }
 .s-other { --c: var(--c-other); }
 .s-all { --c: var(--primary); }
+
+/* 解析记录概览 */
+.pl-stats-panels { margin-top: 16px; }
+.pl-chart-legend { display:flex; flex-wrap:wrap; gap:16px; margin-top:12px; color:var(--text-2); font-size:12px; }
+.pl-chart-legend i { display:inline-block; width:9px; height:9px; margin-right:6px; border-radius:50%; background:var(--primary); }
+.pl-chart-legend i.failed { background:var(--warn); }
+.pl-area { fill:var(--primary-soft); }
+.pl-line { fill:none; stroke:var(--primary); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+.pl-line.pl-fail { stroke:var(--warn); stroke-width:2; stroke-dasharray:4 4; }

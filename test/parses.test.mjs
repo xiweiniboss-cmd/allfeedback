@@ -144,3 +144,23 @@ test('/api/fp-stats：拉黑指纹前给出最近 30 天的不同 IP / 设备数
   assert.equal((await call(env, '/api/fp-stats?fp=xyz', { cookie })).status, 400);
   assert.equal((await call(env, '/api/fp-stats?fp=' + FP)).status, 401);
 });
+
+test('解析统计按北京时间汇总全部记录，支持站点筛选并要求登录', async () => {
+  const d1 = fakeD1();
+  const ins = d1.db.prepare('INSERT INTO parse_log (ts, site, ok) VALUES (?, ?, ?)');
+  const now = Date.now();
+  ins.run(now, 'douyin', 1);
+  ins.run(now, 'douyin', 0);
+  ins.run(now - 86400000, 'bilibili', 1);
+  ins.run(now - 31 * 86400000, 'douyin', 0);
+  const { env } = makeEnv({ PARSE_DB: d1 });
+  assert.equal((await call(env, '/api/parse-stats')).status, 401);
+  const cookie = await login(env);
+  const all = await (await call(env, '/api/parse-stats', { cookie })).json();
+  assert.equal(all.days.length, 30);
+  assert.equal(all.days.reduce((n, d) => n + d.total, 0), 3);
+  assert.equal(all.days.reduce((n, d) => n + d.fail, 0), 1);
+  const one = await (await call(env, '/api/parse-stats?site=douyin', { cookie })).json();
+  assert.equal(one.days.reduce((n, d) => n + d.total, 0), 2);
+  assert.deepEqual(one.sites.map(s => [s.site, s.n]), [['douyin', 2]]);
+});
