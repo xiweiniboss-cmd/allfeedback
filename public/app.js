@@ -3,7 +3,7 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var SVGNS = 'http://www.w3.org/2000/svg';
-  var KINDS = ['解析失败', '下载失败', '还有水印', '视频有问题', '图片有问题', '其他'];
+  var KINDS = ['解析失败', '下载失败', '还有水印', '视频有问题', '图片有问题', '版权投诉', '其他'];
   var SITE_KEYS = ['douyin', 'xiaohongshu', 'bilibili', 'youtube', 'tiktok', 'kuaishou', 'weibo', 'deepseek', 'zhijia', 'brake', 'other'];
   var SITES = { douyin: '抖音', xiaohongshu: '小红书', bilibili: 'B站', youtube: 'YouTube', tiktok: 'TikTok', kuaishou: '快手', weibo: '微博', deepseek: 'DeepSeek', zhijia: '智驾模拟器', brake: '刹车模拟器', other: '其他' };
   var state = { pl: { site: '', result: '', cursor: null, seq: 0 }, cursor: null, loading: false, site: '', status: '', order: 'desc', total: 0, more: false, stats: null, seq: 0, view: 'fb', pfSite: '', pfRange: 30, pf: null, pfSeq: 0 };
