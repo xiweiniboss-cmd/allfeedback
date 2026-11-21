@@ -710,7 +710,7 @@
     var HASH = { pf: '#failures', pl: '#parses', bl: '#blocklist' };
     try { history.replaceState(null, '', HASH[v] || location.pathname); } catch (e) {}
     if (v === 'pf') { pfTitle(); if (state.pf) renderPf(state.pf); loadPf(); }
-    else if (v === 'pl') { plTitle(); renderPlNav(); loadPl(true); }
+    else if (v === 'pl') { plTitle(); renderPlNav(); loadPl(true); loadPlStats(); }
     else if (v === 'bl') { $('pageTitle').textContent = '黑名单'; $('pageSub').textContent = '被拉黑的 IP / 设备在所有解析站都无法解析（返回「访问受限」）'; renderPlNav(); loadBl(); }
     else { setSiteTitle(); if (state.stats) renderNav(state.stats); }
   }
@@ -848,6 +848,71 @@
   seg('segPfRange', function (v) { state.pfRange = v === '7' ? 7 : 30; loadPf(); });
 
   /* ---------- 解析记录 / 黑名单（D1） ---------- */
+  var plStatsSeq = 0, plStats = null;
+  function renderPlStats(j) {
+    var days = j.days || [], last7 = days.slice(-7);
+    var sum = function (xs, key) { return xs.reduce(function (a, x) { return a + (x[key] || 0); }, 0); };
+    var total = sum(days, 'total'), fails = sum(days, 'fail');
+    var k = $('plKpis'); k.textContent = '';
+    k.appendChild(kpi('今日解析', days.length ? days[days.length - 1].total : 0, '北京时间', 'today'));
+    k.appendChild(kpi('近 7 天', sum(last7, 'total'), '日均 ' + (sum(last7, 'total') / 7).toFixed(1), 'trend'));
+    k.appendChild(kpi('近 30 天', total, '成功 ' + (total - fails) + ' 次', 'layers'));
+    k.appendChild(kpi('成功率', total ? ((total - fails) * 100 / total).toFixed(1) + '%' : '—', '近 30 天', 'check'));
+    var dist = $('plDist'); dist.textContent = '';
+    var sites = j.sites || [], max = sites.length ? sites[0].n : 1;
+    if (!sites.length) dist.appendChild(el('p', 'muted small', '暂无解析记录'));
+    sites.forEach(function (x) {
+      var row = el('button', 'dist-row s-' + siteKey(x.site)); row.type = 'button';
+      row.appendChild(el('span', null, x.label));
+      var bar = el('span', 'dist-bar'), fill = el('i'); fill.style.width = Math.max(3, x.n / max * 100) + '%'; bar.appendChild(fill); row.appendChild(bar);
+      row.appendChild(el('b', null, x.n));
+      if (PF_SITES.indexOf(x.site) >= 0) row.addEventListener('click', function () { setPlFilter('site', x.site); });
+      dist.appendChild(row);
+    });
+    drawPlChart();
+  }
+  function drawPlChart() {
+    if (!plStats) return;
+    var box = $('plChart'), days = plStats.days.slice(-Number($('plRange').value)), w = box.clientWidth, h = box.clientHeight;
+    if (!w || !h || !days.length) return;
+    box.textContent = '';
+    var total = days.reduce(function (a, d) { return a + d.total; }, 0);
+    $('plChartLegend').textContent = '共 ' + total + ' 次';
+    var ticks = niceTicks(Math.max.apply(null, days.map(function (d) { return d.total; })));
+    var top = ticks[ticks.length - 1], l = 38, right = w - 14, y0 = 12, bottom = h - 26;
+    var X = function (i) { return l + i * (right - l) / Math.max(days.length - 1, 1); };
+    var Y = function (n) { return bottom - n / top * (bottom - y0); };
+    var svg = svgEl('svg', { viewBox: '0 0 ' + w + ' ' + h, width: w, height: h });
+    ticks.forEach(function (n) {
+      svg.appendChild(svgEl('line', { x1: l, x2: right, y1: Y(n), y2: Y(n), class: 'grid' }));
+      var t = svgEl('text', { x: l - 7, y: Y(n) + 4, 'text-anchor': 'end', class: 'axis' }); t.textContent = n; svg.appendChild(t);
+    });
+    var line = function (key) { return days.map(function (d, i) { return (i ? ' L' : 'M') + X(i) + ',' + Y(d[key]); }).join(''); };
+    svg.appendChild(svgEl('path', { d: line('total') + ' L' + X(days.length - 1) + ',' + bottom + ' L' + X(0) + ',' + bottom + ' Z', class: 'pl-area' }));
+    svg.appendChild(svgEl('path', { d: line('total'), class: 'pl-line' }));
+    svg.appendChild(svgEl('path', { d: line('fail'), class: 'pl-line pl-fail' }));
+    days.forEach(function (d, i) {
+      if (i === 0 || i === days.length - 1 || (days.length === 30 && i % 7 === 0)) {
+        var t = svgEl('text', { x: X(i), y: h - 5, 'text-anchor': i === 0 ? 'start' : i === days.length - 1 ? 'end' : 'middle', class: 'axis' });
+        t.textContent = i === days.length - 1 ? '今天' : d.day.slice(5).replace('-', '/'); svg.appendChild(t);
+      }
+      var hit = svgEl('circle', { cx: X(i), cy: Y(d.total), r: 8, fill: 'transparent', tabindex: 0 });
+      var title = svgEl('title', {}); title.textContent = d.day + '：解析 ' + d.total + ' 次，失败 ' + d.fail + ' 次'; hit.appendChild(title); svg.appendChild(hit);
+    });
+    box.appendChild(svg);
+  }
+  if (window.ResizeObserver) new ResizeObserver(drawPlChart).observe($('plChart'));
+  else window.addEventListener('resize', drawPlChart);
+  $('plRange').addEventListener('change', drawPlChart);
+  async function loadPlStats() {
+    var seq = ++plStatsSeq;
+    plStats = null; $('plChart').textContent = ''; $('plChartLegend').textContent = '加载中…'; $('plDist').textContent = '';
+    $('plKpis').textContent = ''; ['今日解析', '近 7 天', '近 30 天', '成功率'].forEach(function (x) { $('plKpis').appendChild(kpi(x, null, '', 'trend')); });
+    var j = await api('/api/parse-stats' + (state.pl.site ? '?site=' + encodeURIComponent(state.pl.site) : ''));
+    if (seq !== plStatsSeq) return;
+    if (!j.ok) { $('plChartLegend').textContent = j.status === 401 ? '' : '统计加载失败，请刷新重试'; return; }
+    plStats = j; renderPlStats(j);
+  }
   function plTitle() {
     var s = state.pl.site;
     $('pageTitle').textContent = s ? (SITES[s] || s) + ' 解析记录' : '解析记录';
@@ -866,7 +931,7 @@
     });
   }
   function setPlFilter(k, v) {
-    if (k === 'site') { state.pl.site = v; $('plSite').value = v; renderPlNav(); plTitle(); }
+    if (k === 'site') { state.pl.site = v; $('plSite').value = v; renderPlNav(); plTitle(); loadPlStats(); }
     if (k === 'ip') $('plIp').value = v;
     if (k === 'device') $('plDev').value = v;
     if (k === 'fp') $('plFp').value = v;
@@ -1098,7 +1163,7 @@
     });
   })();
 
-  function reloadAll() { renderKpisLoading(); loadStats(); loadPage(true); if (state.view === 'pf') loadPf(); if (state.view === 'pl') loadPl(true); if (state.view === 'bl') loadBl(); }
+  function reloadAll() { renderKpisLoading(); loadStats(); loadPage(true); if (state.view === 'pf') loadPf(); if (state.view === 'pl') { loadPl(true); loadPlStats(); } if (state.view === 'bl') loadBl(); }
   var qTimer;
   $('fQ').addEventListener('input', function () { clearTimeout(qTimer); qTimer = setTimeout(function () { loadPage(true); }, 350); });
   $('fQ').addEventListener('keydown', function (e) { if (e.key === 'Enter') { clearTimeout(qTimer); loadPage(true); } });

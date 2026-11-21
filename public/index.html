@@ -141,6 +141,16 @@
 
     <!-- 解析记录：谁解析了什么（D1 parse_log，保留 30 天） -->
     <div id="plView" hidden>
+      <section class="kpis" id="plKpis" aria-label="解析概览"></section>
+      <section class="panels pl-stats-panels">
+        <div class="panel chart-panel">
+          <div class="panel-head"><div><h2>解析趋势</h2><span class="muted small">每天的解析次数 · 北京时间</span></div><select id="plRange" class="select" aria-label="统计时间范围"><option value="30">近 30 天</option><option value="7">近 7 天</option></select></div>
+          <div class="pl-chart-legend"><span><i></i>解析总量</span><span><i class="failed"></i>失败次数</span><span id="plChartLegend" class="muted"></span></div>
+          <div class="chart" id="plChart" role="img" aria-label="每天解析总量和失败次数"></div>
+        </div>
+        <div class="panel dist-panel"><div class="panel-head"><h2>平台分布</h2><span class="muted small">近 30 天</span></div><div class="dist" id="plDist"></div></div>
+      </section>
+      <p class="muted small note">统计按站点筛选，其他筛选条件仅影响下方记录；失败包含所有记录中的失败，与「解析失败」视图的统计口径不同。</p>
       <div class="toolbar pl-toolbar">
         <select id="plSite" class="select" aria-label="站点"><option value="">全部站点</option></select>
         <div class="seg" id="segPlResult" role="radiogroup" aria-label="结果">
